@@ -209,7 +209,7 @@ async def dashboard_page():
     .status{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600}.running{background:#FF6B3520;color:#FF6B35}.completed{background:#4ECDC420;color:#4ECDC4}.pending{background:#88888820;color:#888}
     @media(max-width:640px){.grid{grid-template-columns:1fr}}</style>
     </head><body><div style="max-width:900px;margin:0 auto"><div class="header"><div class="logo">APEX SWARM</div><div style="color:#888;font-size:0.85rem" id="status">Connecting...</div></div>
-    <div style="display:flex;gap:16px;justify-content:center;margin-bottom:24px;flex-wrap:wrap" id="swarm-stats"><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#4ECDC4;font-weight:700" id="st-deployed">0</span> <span style="color:#888">deployed</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#7B68EE;font-weight:700" id="st-completed">0</span> <span style="color:#888">completed</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#FF6B35;font-weight:700" id="st-users">0</span> <span style="color:#888">users</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#4ECDC4;font-weight:700" id="st-types">0</span><span style="color:#888">/18 agent types active</span></div></div><div class="grid"><div class="card"><h2>Deploy Agent</h2>
+    <div style="display:flex;gap:16px;justify-content:center;margin-bottom:24px;flex-wrap:wrap" id="swarm-stats"><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#4ECDC4;font-weight:700" id="st-deployed">0</span> <span style="color:#888">deployed</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#7B68EE;font-weight:700" id="st-completed">0</span> <span style="color:#888">completed</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#FF6B35;font-weight:700" id="st-users">0</span> <span style="color:#888">users</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#4ECDC4;font-weight:700" id="st-types">0</span><span style="color:#888">/18 types active</span></div><div style="padding:8px 16px;background:#111118;border:1px solid #222;border-radius:8px;font-size:0.85rem"><span style="color:#E8E6E3;font-weight:700" id="st-patterns">0</span> <span style="color:#888">patterns learned</span></div></div><div class="grid"><div class="card"><h2>Deploy Agent</h2>
     <select id="agentType"><optgroup label="Crypto & DeFi"><option value="research">Research Analyst</option><option value="arbitrage">Arbitrage Scanner</option><option value="defi">DeFi Yield Analyst</option><option value="token-analysis">Token Analyzer</option><option value="whale-tracker">Whale Tracker</option></optgroup><optgroup label="Coding & Dev"><option value="code-writer">Code Writer</option><option value="code-reviewer">Code Reviewer</option><option value="debugger">Debugger</option><option value="api-builder">API Builder</option><option value="database-architect">Database Architect</option></optgroup><optgroup label="Writing & Content"><option value="copywriter">Copywriter</option><option value="blog-writer">Blog Writer</option><option value="email-writer">Email Writer</option><option value="social-media">Social Media Agent</option></optgroup><optgroup label="Data & Research"><option value="data-analyst">Data Analyst</option><option value="market-researcher">Market Researcher</option><option value="report-writer">Report Writer</option><option value="competitor-analyst">Competitor Analyst</option></optgroup></select>
     <textarea id="taskDesc" rows="3" placeholder="Describe your task..."></textarea>
     <button class="btn" onclick="deploy()">Deploy Agent →</button></div>
@@ -223,7 +223,7 @@ async def dashboard_page():
     if(d.tasks.length===0){c.innerHTML='<div style="color:#555;text-align:center;padding:20px">No tasks yet</div>';return}
     c.innerHTML=d.tasks.map(t=>'<div class="task"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><strong>'+t.agent_type+'</strong><span class="status '+t.status+'">'+t.status+'</span></div><div style="color:#888">'+t.task_description+'</div>'+(t.result?'<div style="margin-top:8px;color:#4ECDC4;font-size:0.8rem">'+t.result+'</div>':'')+'</div>').join('')}}catch(e){}}
     loadTasks();setInterval(loadTasks,5000);
-    async function loadStats(){try{const r=await fetch("/api/v1/stats");if(r.ok){const d=await r.json();document.getElementById("st-deployed").textContent=d.total_agents_deployed;document.getElementById("st-completed").textContent=d.total_completed;document.getElementById("st-users").textContent=d.total_users;document.getElementById("st-types").textContent=d.agent_types_active}}catch(e){}}
+    async function loadStats(){try{const r=await fetch("/api/v1/stats");if(r.ok){const d=await r.json();document.getElementById("st-deployed").textContent=d.total_agents_deployed;document.getElementById("st-completed").textContent=d.total_completed;document.getElementById("st-users").textContent=d.total_users;document.getElementById("st-types").textContent=d.agent_types_active;document.getElementById("st-patterns").textContent=d.swarm_intelligence_patterns}}catch(e){}}
     loadStats();setInterval(loadStats,10000);</script></body></html>"""
 
 
@@ -321,6 +321,7 @@ async def get_stats():
         today_deployed = conn.execute("SELECT COUNT(*) FROM agents WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
         today_completed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'completed' AND completed_at LIKE ?", (today + "%",)).fetchone()[0]
         agent_types_used = conn.execute("SELECT COUNT(DISTINCT agent_type) FROM agents").fetchone()[0]
+        total_patterns = conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0]
     finally:
         conn.close()
     return {
@@ -331,7 +332,7 @@ async def get_stats():
         "today_completed": today_completed,
         "agent_types_active": agent_types_used,
         "agent_types_available": len(AGENTS),
-        "swarm_intelligence_patterns": total_completed,
+        "swarm_intelligence_patterns": total_patterns,
     }
 
 
@@ -349,6 +350,55 @@ async def health_check():
 
 
 # ─── BACKGROUND TASK ──────────────────────────────────────
+
+def store_pattern(agent_id: str, agent_type: str, result: str):
+    """Extract and store knowledge pattern from completed task."""
+    try:
+        # Store the result summary as a pattern
+        pattern = result[:500] if len(result) > 500 else result
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO knowledge (id, agent_type, pattern, source_task_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), agent_type, pattern, agent_id, datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"Knowledge stored from {agent_id[:8]}")
+    except Exception as e:
+        logger.error(f"Failed to store pattern: {e}")
+
+
+def get_collective_knowledge(agent_type: str, limit: int = 5) -> str:
+    """Retrieve recent patterns from the collective knowledge base."""
+    try:
+        conn = get_db()
+        # Get patterns from same agent type + general patterns
+        rows = conn.execute(
+            "SELECT pattern FROM knowledge WHERE agent_type = ? ORDER BY created_at DESC LIMIT ?",
+            (agent_type, limit),
+        ).fetchall()
+        # Also get cross-domain insights
+        cross = conn.execute(
+            "SELECT agent_type, pattern FROM knowledge WHERE agent_type != ? ORDER BY created_at DESC LIMIT ?",
+            (agent_type, 3),
+        ).fetchall()
+        conn.close()
+        if not rows and not cross:
+            return ""
+        knowledge = "\n\nCOLLECTIVE SWARM INTELLIGENCE (learned from previous agents):\n"
+        if rows:
+            knowledge += "\nRecent findings from " + agent_type + " agents:\n"
+            for r in rows:
+                knowledge += "- " + r[0][:200] + "\n"
+        if cross:
+            knowledge += "\nCross-domain insights:\n"
+            for r in cross:
+                knowledge += "- [" + r[0] + "] " + r[1][:150] + "\n"
+        return knowledge
+    except Exception as e:
+        logger.error(f"Failed to retrieve knowledge: {e}")
+        return ""
+
 
 async def execute_task(agent_id: str, agent_type: str, task_description: str):
     """Execute task using Claude API. Falls back to placeholder if no API key."""
@@ -370,7 +420,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str):
                     json={
                         "model": CLAUDE_MODEL,
                         "max_tokens": 1024,
-                        "system": system_prompt,
+                        "system": system_prompt + get_collective_knowledge(agent_type),
                         "messages": [{"role": "user", "content": task_description}],
                     },
                 )
@@ -389,6 +439,9 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str):
             )
             conn.commit()
             logger.info(f"Task completed: {agent_id[:8]}")
+            # Store in collective knowledge
+            if not result.startswith("[Placeholder]") and not result.startswith("Agent error"):
+                store_pattern(agent_id, agent_type, result)
         finally:
             conn.close()
     except Exception as e:
