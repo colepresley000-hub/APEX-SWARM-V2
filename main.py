@@ -25,6 +25,7 @@ from pydantic import BaseModel, EmailStr
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 MONTHLY_AGENT_LIMIT = int(os.getenv("MONTHLY_AGENT_LIMIT", "20"))
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Agent Registry - add new agents here, no code changes needed
 AGENTS = {
@@ -95,6 +96,12 @@ def init_db():
                 created_at TEXT NOT NULL,
                 completed_at TEXT,
                 FOREIGN KEY (user_api_key) REFERENCES users(api_key)
+            );
+            CREATE TABLE IF NOT EXISTS telegram_users (
+                chat_id TEXT PRIMARY KEY,
+                api_key TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (api_key) REFERENCES users(api_key)
             );
             CREATE TABLE IF NOT EXISTS knowledge (
                 id TEXT PRIMARY KEY,
@@ -356,6 +363,159 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
+
+
+
+
+# ─── TELEGRAM BOT ─────────────────────────────────────────
+
+async def send_telegram(chat_id: str, text: str):
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": text[:4096], "parse_mode": "Markdown"},
+            )
+    except Exception as e:
+        logger.error(f"Telegram send failed: {e}")
+
+
+@app.post("/api/v1/telegram/webhook")
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        message = data.get("message", {})
+        chat_id = str(message.get("chat", {}).get("id", ""))
+        text = message.get("text", "").strip()
+        if not chat_id or not text:
+            return {"ok": True}
+
+        if text == "/start":
+            await send_telegram(chat_id, "*APEX SWARM Bot*\nLink your account:\n`/link YOUR_API_KEY`\nThen deploy agents:\n`/deploy research Analyze BTC trends`\nCommands: /agents /status /recent /help")
+            return {"ok": True}
+
+        if text == "/help":
+            await send_telegram(chat_id, "*Commands:*\n`/link API_KEY` - link account\n`/deploy TYPE task` - deploy agent\n`/agents` - list types\n`/status` - your stats\n`/recent` - last 5 results")
+            return {"ok": True}
+
+        if text.startswith("/link "):
+            api_key = text[6:].strip()
+            conn = get_db()
+            user = conn.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
+            if not user:
+                conn.close()
+                await send_telegram(chat_id, "Invalid API key.")
+                return {"ok": True}
+            conn.execute("INSERT OR REPLACE INTO telegram_users (chat_id, api_key, created_at) VALUES (?, ?, ?)", (chat_id, api_key, datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+            conn.close()
+            await send_telegram(chat_id, "Linked! Deploy agents with /deploy")
+            return {"ok": True}
+
+        conn = get_db()
+        tg_user = conn.execute("SELECT api_key FROM telegram_users WHERE chat_id = ?", (chat_id,)).fetchone()
+        conn.close()
+        if not tg_user:
+            await send_telegram(chat_id, "Link your account first: /link YOUR_API_KEY")
+            return {"ok": True}
+        api_key = tg_user[0]
+
+        if text == "/agents":
+            cats = {}
+            for key, agent in AGENTS.items():
+                cat = agent["category"]
+                if cat not in cats:
+                    cats[cat] = []
+                cats[cat].append(f"`{key}` - {agent['name']}")
+            msg = "*Available Agents:*\n"
+            for cat, items in cats.items():
+                msg += f"\n*{cat}:*\n" + "\n".join(items)
+            await send_telegram(chat_id, msg)
+            return {"ok": True}
+
+        if text == "/status":
+            conn = get_db()
+            now = datetime.now(timezone.utc)
+            ms = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+            total = conn.execute("SELECT COUNT(*) FROM agents WHERE user_api_key = ?", (api_key,)).fetchone()[0]
+            done = conn.execute("SELECT COUNT(*) FROM agents WHERE user_api_key = ? AND status = 'completed'", (api_key,)).fetchone()[0]
+            mo = conn.execute("SELECT COUNT(*) FROM agents WHERE user_api_key = ? AND created_at >= ?", (api_key, ms)).fetchone()[0]
+            pats = conn.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0]
+            conn.close()
+            await send_telegram(chat_id, f"*Your Stats:*\nDeployed: {total}\nCompleted: {done}\nThis month: {mo}/{MONTHLY_AGENT_LIMIT}\nSwarm patterns: {pats}")
+            return {"ok": True}
+
+        if text == "/recent":
+            conn = get_db()
+            rows = conn.execute("SELECT agent_type, status, result FROM agents WHERE user_api_key = ? ORDER BY created_at DESC LIMIT 5", (api_key,)).fetchall()
+            conn.close()
+            if not rows:
+                await send_telegram(chat_id, "No tasks yet.")
+                return {"ok": True}
+            msg = "*Recent Tasks:*\n\n"
+            for r in rows:
+                preview = (r[2] or "pending")[:200]
+                msg += f"*{r[0]}* ({r[1]})\n{preview}\n\n"
+            await send_telegram(chat_id, msg)
+            return {"ok": True}
+
+        if text.startswith("/deploy "):
+            parts = text[8:].strip().split(" ", 1)
+            if len(parts) < 2:
+                await send_telegram(chat_id, "Usage: /deploy agent_type Your task description")
+                return {"ok": True}
+            agent_type = parts[0].lower()
+            task_desc = parts[1]
+            if agent_type not in AGENTS:
+                await send_telegram(chat_id, f"Unknown agent: {agent_type}. Use /agents to see types.")
+                return {"ok": True}
+            conn = get_db()
+            now = datetime.now(timezone.utc)
+            ms = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+            count = conn.execute("SELECT COUNT(*) FROM agents WHERE user_api_key = ? AND created_at >= ?", (api_key, ms)).fetchone()[0]
+            if count >= MONTHLY_AGENT_LIMIT:
+                conn.close()
+                await send_telegram(chat_id, f"Monthly limit reached ({MONTHLY_AGENT_LIMIT}).")
+                return {"ok": True}
+            agent_id = str(uuid.uuid4())
+            conn.execute("INSERT INTO agents (id, user_api_key, agent_type, task_description, status, created_at) VALUES (?, ?, ?, ?, 'running', ?)", (agent_id, api_key, agent_type, task_desc, datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+            conn.close()
+            await send_telegram(chat_id, f"Deploying *{AGENTS[agent_type]['name']}*...\nTask: {task_desc[:100]}")
+            asyncio.create_task(execute_task_tg(agent_id, agent_type, task_desc, chat_id))
+            return {"ok": True}
+
+        await send_telegram(chat_id, "Unknown command. Try /help")
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+        return {"ok": True}
+
+
+async def execute_task_tg(agent_id: str, agent_type: str, task_description: str, chat_id: str):
+    await execute_task(agent_id, agent_type, task_description)
+    conn = get_db()
+    row = conn.execute("SELECT status, result FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    conn.close()
+    if row:
+        result = row[1] or "No result"
+        await send_telegram(chat_id, f"*{AGENTS[agent_type]['name']}* - {row[0]}\n\n{result[:3500]}")
+
+
+@app.get("/api/v1/telegram/setup")
+async def setup_telegram():
+    if not TELEGRAM_BOT_TOKEN:
+        return {"error": "TELEGRAM_BOT_TOKEN not set"}
+    webhook_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    if webhook_url:
+        webhook_url = f"https://{webhook_url}/api/v1/telegram/webhook"
+    else:
+        return {"error": "No public domain found"}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook", json={"url": webhook_url})
+    return r.json()
 
 
 # ─── BACKGROUND TASK ──────────────────────────────────────
