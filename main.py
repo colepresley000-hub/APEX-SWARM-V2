@@ -222,7 +222,9 @@ async def dashboard_page():
     async function loadTasks(){try{const r=await fetch('/api/v1/tasks',{headers:{'X-API-Key':apiKey}});if(r.ok){const d=await r.json();const c=document.getElementById('tasks');
     if(d.tasks.length===0){c.innerHTML='<div style="color:#555;text-align:center;padding:20px">No tasks yet</div>';return}
     c.innerHTML=d.tasks.map(t=>'<div class="task"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><strong>'+t.agent_type+'</strong><span class="status '+t.status+'">'+t.status+'</span></div><div style="color:#888">'+t.task_description+'</div>'+(t.result?'<div style="margin-top:8px;color:#4ECDC4;font-size:0.8rem">'+t.result+'</div>':'')+'</div>').join('')}}catch(e){}}
-    loadTasks();setInterval(loadTasks,5000);</script></body></html>"""
+    loadTasks();setInterval(loadTasks,5000);
+    async function loadStats(){try{const r=await fetch("/api/v1/stats");if(r.ok){const d=await r.json();document.getElementById("usage").innerHTML=d.total_agents_deployed+" deployed &bull; "+d.total_completed+" completed &bull; "+d.total_users+" users"}}catch(e){}}
+    loadStats();setInterval(loadStats,10000);</script></body></html>"""
 
 
 # ─── API ENDPOINTS ────────────────────────────────────────
@@ -305,6 +307,32 @@ async def get_tasks(api_key: str = Depends(verify_api_key)):
     
     tasks = [dict(row) for row in rows]
     return {"tasks": tasks}
+
+
+@app.get("/api/v1/stats")
+async def get_stats():
+    """Real-time platform stats from database."""
+    conn = get_db()
+    try:
+        total_agents_deployed = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+        total_completed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'completed'").fetchone()[0]
+        total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_deployed = conn.execute("SELECT COUNT(*) FROM agents WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+        today_completed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'completed' AND completed_at LIKE ?", (today + "%",)).fetchone()[0]
+        agent_types_used = conn.execute("SELECT COUNT(DISTINCT agent_type) FROM agents").fetchone()[0]
+    finally:
+        conn.close()
+    return {
+        "total_agents_deployed": total_agents_deployed,
+        "total_completed": total_completed,
+        "total_users": total_users,
+        "today_deployed": today_deployed,
+        "today_completed": today_completed,
+        "agent_types_active": agent_types_used,
+        "agent_types_available": len(AGENTS),
+        "swarm_intelligence_patterns": total_completed,
+    }
 
 
 @app.get("/api/v1/health")
