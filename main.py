@@ -28,7 +28,7 @@ from typing import Optional
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 # ─── LOGGING ──────────────────────────────────────────────
@@ -44,12 +44,13 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
 DATABASE_PATH = os.getenv("DATABASE_PATH", "apex_swarm.db")
 PORT = int(os.getenv("PORT", "8080"))
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 # ─── OPTIONAL MODULE IMPORTS (graceful degradation) ───────
 
 TOOLS_AVAILABLE = False
 CHAINS_AVAILABLE = False
+MISSION_CONTROL = False
 
 try:
     from agent_tools import execute_with_tools, get_tools_for_agent
@@ -71,6 +72,18 @@ except ImportError:
     COLLAB_TEMPLATES = {}
     CRON_PRESETS = {}
     logger.warning("⚠️ agent_chains not found — chains/collabs/scheduling disabled")
+
+try:
+    from mission_control import (
+        event_bus, daemon_manager, Event, EventType, DAEMON_PRESETS,
+    )
+    MISSION_CONTROL = True
+    logger.info("✅ mission_control loaded — God-eye, daemons, live feed active")
+except ImportError:
+    event_bus = None
+    daemon_manager = None
+    DAEMON_PRESETS = {}
+    logger.warning("⚠️ mission_control not found — no real-time events")
 
 # Smart knowledge (optional)
 SMART_KNOWLEDGE = False
@@ -378,6 +391,16 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
     category = AGENT_TO_CATEGORY.get(agent_type, "Productivity")
     system_prompt = agent["system"]
 
+    # Emit started event
+    if MISSION_CONTROL:
+        await event_bus.emit(Event(
+            event_type=EventType.AGENT_STARTED,
+            agent_id=agent_id,
+            agent_type=agent_type,
+            agent_name=agent["name"],
+            message=task_description[:200],
+        ))
+
     # Inject knowledge
     knowledge = get_knowledge_for_agent(user_api_key, agent_type, task_description)
     if knowledge:
@@ -427,6 +450,19 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
         finally:
             conn.close()
 
+        # Emit completed event
+        if MISSION_CONTROL:
+            await event_bus.emit(Event(
+                event_type=EventType.AGENT_COMPLETED,
+                agent_id=agent_id,
+                agent_type=agent_type,
+                agent_name=agent["name"],
+                message="Task completed",
+                data={"result_preview": result[:300] if result else ""},
+            ))
+
+        return result
+
     except Exception as e:
         logger.error(f"Task execution failed ({agent_id}): {e}")
         conn = get_db()
@@ -439,10 +475,25 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
         finally:
             conn.close()
 
+        # Emit failed event
+        if MISSION_CONTROL:
+            await event_bus.emit(Event(
+                event_type=EventType.AGENT_FAILED,
+                agent_id=agent_id,
+                agent_type=agent_type,
+                agent_name=agent.get("name", agent_type),
+                message=str(e)[:300],
+            ))
+
 
 # Wrapper for chains module (it expects execute_fn(agent_id, agent_type, prompt))
 async def _chain_execute_fn(agent_id: str, agent_type: str, prompt: str):
     await execute_task(agent_id, agent_type, prompt, user_api_key="chain")
+
+
+async def _daemon_execute_fn(agent_id: str, agent_type: str, prompt: str, user_api_key: str = "daemon"):
+    """Execute function for daemon agents — returns the result text."""
+    return await execute_task(agent_id, agent_type, prompt, user_api_key)
 
 
 # ─── SCHEDULER BACKGROUND LOOP ───────────────────────────
@@ -554,7 +605,7 @@ async def setup_telegram_webhook(base_url: str):
 
 
 async def handle_telegram_message(message: dict):
-    """Process incoming Telegram message."""
+    """Process incoming Telegram message with mission control commands."""
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text", "").strip()
     if not chat_id or not text:
@@ -569,10 +620,140 @@ async def handle_telegram_message(message: dict):
         agent_type = "research"
         task = text
 
+    # ─── MISSION CONTROL COMMANDS ─────
     if agent_type == "start":
-        await send_telegram(chat_id, "🤖 APEX SWARM v3.0\n\nSend any message for research, or use:\n/agent-type Your task\n\nExamples:\n/crypto-research Analyze ETH\n/blog-writer Write about AI\n/code-reviewer Review my code")
+        welcome = (
+            "🤖 *APEX SWARM v3.1 — Mission Control*\n\n"
+            "*Agent Commands:*\n"
+            "/research Your question\n"
+            "/crypto-research Analyze ETH\n"
+            "/blog-writer Write about AI\n\n"
+            "*Mission Control:*\n"
+            "/god\\_eye — Live status overview\n"
+            "/daemons — List running daemons\n"
+            "/start\\_daemon <preset> — Start a daemon\n"
+            "/stop\\_daemon <id> — Stop a daemon\n"
+            "/subscribe — Get live agent feed\n"
+            "/unsubscribe — Stop live feed\n"
+            "/events — Recent activity log\n\n"
+            "*Daemon Presets:*\n"
+            "crypto-monitor, defi-yield-scanner,\n"
+            "news-sentinel, whale-watcher, competitor-tracker"
+        )
+        await send_telegram(chat_id, welcome)
         return
 
+    if agent_type == "god-eye" or agent_type == "god_eye":
+        if not MISSION_CONTROL:
+            await send_telegram(chat_id, "⚠️ Mission Control not loaded")
+            return
+        stats = event_bus.get_stats()
+        msg = (
+            "👁️ *GOD EYE — Live Status*\n\n"
+            f"🤖 Active agents: *{stats['active_agents']}*\n"
+            f"👁️ Active daemons: *{stats['active_daemons']}*\n"
+            f"📡 SSE subscribers: *{stats['sse_subscribers']}*\n"
+            f"📊 Total events: *{stats['total_events']}*\n"
+            f"💬 Telegram feeds: *{stats['telegram_chats']}*\n"
+        )
+        if stats["active_agents_detail"]:
+            msg += "\n*Running Agents:*\n"
+            for aid, info in stats["active_agents_detail"].items():
+                msg += f"  ⚡ {info['name']} (`{aid[:8]}`)\n"
+        if stats["active_daemons_detail"]:
+            msg += "\n*Running Daemons:*\n"
+            for did, info in stats["active_daemons_detail"].items():
+                msg += f"  👁️ {info['name']} — {info['cycles']} cycles (`{did[:8]}`)\n"
+        await send_telegram(chat_id, msg)
+        return
+
+    if agent_type == "daemons":
+        if not MISSION_CONTROL:
+            await send_telegram(chat_id, "⚠️ Mission Control not loaded")
+            return
+        daemons = daemon_manager.get_daemons()
+        if not daemons:
+            await send_telegram(chat_id, "No active daemons. Start one with:\n/start\\_daemon crypto-monitor")
+            return
+        msg = "👁️ *Active Daemons:*\n\n"
+        for d in daemons:
+            status_icon = "🟢" if d["status"] == "running" else "🔴"
+            msg += (
+                f"{status_icon} *{d['agent_name']}*\n"
+                f"  ID: `{d['daemon_id'][:8]}`\n"
+                f"  Cycles: {d['cycles']} | Every {d['interval_seconds']}s\n"
+                f"  Status: {d['status']}\n\n"
+            )
+        await send_telegram(chat_id, msg)
+        return
+
+    if agent_type == "start-daemon" or agent_type == "start_daemon":
+        if not MISSION_CONTROL:
+            await send_telegram(chat_id, "⚠️ Mission Control not loaded")
+            return
+        preset_id = task.strip().lower() if task else ""
+        if preset_id not in DAEMON_PRESETS:
+            presets = ", ".join(DAEMON_PRESETS.keys())
+            await send_telegram(chat_id, f"Unknown preset. Available:\n`{presets}`")
+            return
+        preset = DAEMON_PRESETS[preset_id]
+        daemon_id = await daemon_manager.start_daemon(
+            agent_type=preset["agent_type"],
+            agent_name=preset["name"],
+            task_description=preset["task_description"],
+            execute_fn=_daemon_execute_fn,
+            interval_seconds=preset["interval_seconds"],
+            alert_conditions=preset.get("alert_conditions", []),
+            user_api_key=f"telegram:{chat_id}",
+        )
+        await send_telegram(chat_id, f"👁️ *{preset['name']}* started\nID: `{daemon_id[:8]}`\nInterval: every {preset['interval_seconds']}s\n\nStop with: /stop\\_daemon {daemon_id[:8]}")
+        return
+
+    if agent_type == "stop-daemon" or agent_type == "stop_daemon":
+        if not MISSION_CONTROL:
+            await send_telegram(chat_id, "⚠️ Mission Control not loaded")
+            return
+        short_id = task.strip()
+        # Find daemon matching the short ID
+        found = None
+        for d in daemon_manager.get_daemons():
+            if d["daemon_id"].startswith(short_id):
+                found = d["daemon_id"]
+                break
+        if not found:
+            await send_telegram(chat_id, f"No daemon found matching `{short_id}`")
+            return
+        await daemon_manager.stop_daemon(found)
+        await send_telegram(chat_id, f"⏹️ Daemon `{short_id}` stopped")
+        return
+
+    if agent_type == "subscribe":
+        if MISSION_CONTROL:
+            event_bus.add_telegram_chat(chat_id)
+            await send_telegram(chat_id, "📡 *Subscribed to live feed*\nYou'll receive real-time agent activity.\n\nUnsubscribe: /unsubscribe")
+        return
+
+    if agent_type == "unsubscribe":
+        if MISSION_CONTROL:
+            event_bus.remove_telegram_chat(chat_id)
+            await send_telegram(chat_id, "🔇 Unsubscribed from live feed")
+        return
+
+    if agent_type == "events":
+        if not MISSION_CONTROL:
+            await send_telegram(chat_id, "⚠️ Mission Control not loaded")
+            return
+        events = event_bus.get_history(limit=10)
+        if not events:
+            await send_telegram(chat_id, "No recent events.")
+            return
+        msg = "📋 *Recent Events:*\n\n"
+        for e in events[-10:]:
+            msg += f"• `{e['event_type']}` — {e['agent_name'] or e['agent_type']}: {e['message'][:80]}\n"
+        await send_telegram(chat_id, msg)
+        return
+
+    # ─── REGULAR AGENT EXECUTION ─────
     if agent_type not in AGENTS:
         agent_type = "research"
 
@@ -623,8 +804,14 @@ async def lifespan(app: FastAPI):
     init_db()
     # Start scheduler
     scheduler_task = asyncio.create_task(scheduler_loop())
+
+    # Wire event bus to Telegram
+    if MISSION_CONTROL and TELEGRAM_ENABLED:
+        event_bus.set_telegram(send_fn=send_telegram, verbosity="important")
+        logger.info("📡 Event bus → Telegram forwarding active")
+
     logger.info(f"🚀 APEX SWARM v{VERSION} starting")
-    logger.info(f"   Tools: {'✅' if TOOLS_AVAILABLE else '❌'} | Chains: {'✅' if CHAINS_AVAILABLE else '❌'} | Knowledge: {'✅' if SMART_KNOWLEDGE else '❌'}")
+    logger.info(f"   Tools: {'✅' if TOOLS_AVAILABLE else '❌'} | Chains: {'✅' if CHAINS_AVAILABLE else '❌'} | Knowledge: {'✅' if SMART_KNOWLEDGE else '❌'} | Mission Control: {'✅' if MISSION_CONTROL else '❌'}")
     yield
     scheduler_task.cancel()
     try:
@@ -657,6 +844,7 @@ async def health():
         "tools": TOOLS_AVAILABLE,
         "chains": CHAINS_AVAILABLE,
         "smart_knowledge": SMART_KNOWLEDGE,
+        "mission_control": MISSION_CONTROL,
         "telegram": TELEGRAM_ENABLED,
     }
 
@@ -668,7 +856,7 @@ async def legacy_tasks(request: Request):
     client = request.client.host if request.client else "unknown"
     ua = request.headers.get("user-agent", "unknown")
     logger.info(f"👻 Legacy /tasks hit from {client} (UA: {ua[:80]})")
-    return {"tasks": [], "message": "Migrated to v3.0 — use /api/v1/history", "version": VERSION}
+    return {"tasks": [], "message": "Migrated to v3.1 — use /api/v1/history", "version": VERSION}
 
 
 @app.get("/api/v1/stats")
@@ -683,6 +871,157 @@ async def legacy_stats(request: Request):
     finally:
         conn.close()
     return {"total_tasks": total, "completed": completed, "agents": len(AGENTS), "version": VERSION}
+
+
+# ─── MISSION CONTROL ENDPOINTS ───────────────────────────
+
+@app.get("/api/v1/events/stream")
+async def event_stream(request: Request):
+    """SSE endpoint — real-time God-eye stream of all agent activity."""
+    if not MISSION_CONTROL:
+        raise HTTPException(status_code=503, detail="Mission Control not loaded")
+
+    async def generate():
+        queue = event_bus.subscribe()
+        try:
+            # Send initial connection event
+            yield f"event: connected\ndata: {{\"message\": \"God-eye connected\", \"version\": \"{VERSION}\"}}\n\n"
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield event.to_sse()
+                except asyncio.TimeoutError:
+                    # Send heartbeat to keep connection alive
+                    yield f"event: heartbeat\ndata: {{\"ts\": \"{datetime.now(timezone.utc).isoformat()}\"}}\n\n"
+                except asyncio.CancelledError:
+                    break
+        finally:
+            event_bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/v1/events")
+async def get_events(limit: int = 50, event_type: str = None):
+    """Get recent event history."""
+    if not MISSION_CONTROL:
+        return {"events": [], "message": "Mission Control not loaded"}
+    return {"events": event_bus.get_history(limit=limit, event_type=event_type)}
+
+
+@app.get("/api/v1/god-eye")
+async def god_eye_status():
+    """God-eye overview — current state of everything."""
+    stats = event_bus.get_stats() if MISSION_CONTROL else {}
+    conn = get_db()
+    try:
+        running = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'running'").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+        completed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'completed'").fetchone()[0]
+        failed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'failed'").fetchone()[0]
+    finally:
+        conn.close()
+
+    return {
+        "version": VERSION,
+        "mission_control": MISSION_CONTROL,
+        "db": {"running": running, "total": total, "completed": completed, "failed": failed},
+        "live": stats,
+        "modules": {
+            "tools": TOOLS_AVAILABLE,
+            "chains": CHAINS_AVAILABLE,
+            "knowledge": SMART_KNOWLEDGE,
+            "mission_control": MISSION_CONTROL,
+            "telegram": TELEGRAM_ENABLED,
+        },
+    }
+
+
+# ─── DAEMON ENDPOINTS ────────────────────────────────────
+
+class DaemonRequest(BaseModel):
+    preset_id: Optional[str] = None
+    agent_type: str = "research"
+    agent_name: str = "Custom Daemon"
+    task_description: str = ""
+    interval_seconds: int = 300
+    max_cycles: int = 0
+    alert_conditions: list[str] = []
+
+
+@app.post("/api/v1/daemons")
+async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
+    if not MISSION_CONTROL:
+        raise HTTPException(status_code=503, detail="Mission Control not loaded")
+
+    if req.preset_id and req.preset_id in DAEMON_PRESETS:
+        preset = DAEMON_PRESETS[req.preset_id]
+        daemon_id = await daemon_manager.start_daemon(
+            agent_type=preset["agent_type"],
+            agent_name=preset["name"],
+            task_description=req.task_description or preset["task_description"],
+            execute_fn=_daemon_execute_fn,
+            interval_seconds=preset["interval_seconds"],
+            alert_conditions=preset.get("alert_conditions", []),
+            user_api_key=api_key,
+        )
+        return {"daemon_id": daemon_id, "name": preset["name"], "status": "running"}
+    elif req.task_description:
+        daemon_id = await daemon_manager.start_daemon(
+            agent_type=req.agent_type,
+            agent_name=req.agent_name,
+            task_description=req.task_description,
+            execute_fn=_daemon_execute_fn,
+            interval_seconds=req.interval_seconds,
+            max_cycles=req.max_cycles,
+            alert_conditions=req.alert_conditions,
+            user_api_key=api_key,
+        )
+        return {"daemon_id": daemon_id, "name": req.agent_name, "status": "running"}
+    else:
+        raise HTTPException(status_code=400, detail="Provide preset_id or task_description")
+
+
+@app.get("/api/v1/daemons")
+async def list_daemons():
+    if not MISSION_CONTROL:
+        return {"daemons": [], "message": "Mission Control not loaded"}
+    return {"daemons": daemon_manager.get_daemons()}
+
+
+@app.get("/api/v1/daemons/presets")
+async def list_daemon_presets():
+    return {
+        "presets": {
+            pid: {"name": p["name"], "description": p["description"], "agent_type": p["agent_type"], "interval": p["interval_seconds"]}
+            for pid, p in DAEMON_PRESETS.items()
+        }
+    }
+
+
+@app.delete("/api/v1/daemons/{daemon_id}")
+async def stop_daemon(daemon_id: str, api_key: str = Depends(get_api_key)):
+    if not MISSION_CONTROL:
+        raise HTTPException(status_code=503, detail="Mission Control not loaded")
+    # Support short IDs
+    found = None
+    for d in daemon_manager.get_daemons():
+        if d["daemon_id"].startswith(daemon_id):
+            found = d["daemon_id"]
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Daemon not found")
+    await daemon_manager.stop_daemon(found)
+    return {"status": "stopped", "daemon_id": found}
 
 
 @app.get("/api/v1/agents")
@@ -1431,6 +1770,7 @@ body {
   <div class="tab" data-tab="pipelines">🔗 Pipelines</div>
   <div class="tab" data-tab="collabs">🧠 Collaboration</div>
   <div class="tab" data-tab="scheduled">⏰ Scheduled</div>
+  <div class="tab" data-tab="godeye">👁️ God Eye</div>
 </div>
 
 <div class="main">
@@ -1498,6 +1838,49 @@ body {
     </div>
     <div id="scheduleList"></div>
   </div>
+
+  <!-- GOD EYE TAB -->
+  <div class="tab-content" id="tab-godeye">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px;" id="godeyeStats">
+      <div class="card" style="text-align:center;cursor:default;">
+        <div style="font-size:32px;font-family:'Fraunces',serif;color:var(--accent);" id="geActiveAgents">0</div>
+        <div style="color:var(--text2);font-size:13px;">Active Agents</div>
+      </div>
+      <div class="card" style="text-align:center;cursor:default;">
+        <div style="font-size:32px;font-family:'Fraunces',serif;color:var(--success);" id="geActiveDaemons">0</div>
+        <div style="color:var(--text2);font-size:13px;">Daemons Running</div>
+      </div>
+      <div class="card" style="text-align:center;cursor:default;">
+        <div style="font-size:32px;font-family:'Fraunces',serif;color:var(--warning);" id="geTotalEvents">0</div>
+        <div style="color:var(--text2);font-size:13px;">Total Events</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <!-- Daemons Panel -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="font-family:'Fraunces',serif;">Daemons</h3>
+          <select id="daemonPreset" style="padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;">
+            <option value="">Start daemon...</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="startDaemon()">Start</button>
+        </div>
+        <div id="daemonList"></div>
+      </div>
+
+      <!-- Live Event Feed -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="font-family:'Fraunces',serif;">Live Feed</h3>
+          <div>
+            <button class="btn btn-sm" id="sseToggle" onclick="toggleSSE()" style="background:var(--success);color:white;">● Connected</button>
+          </div>
+        </div>
+        <div id="eventFeed" style="max-height:500px;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:6px;"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Deploy Modal -->
@@ -1527,6 +1910,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'pipelines') loadPipelines();
     if (tab.dataset.tab === 'collabs') loadCollabs();
     if (tab.dataset.tab === 'scheduled') loadSchedules();
+    if (tab.dataset.tab === 'godeye') { loadDaemons(); refreshGodEye(); connectSSE(); }
   });
 });
 
@@ -1769,6 +2153,135 @@ function renderMarkdown(text) {
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
     .replace(/\n/g, '<br>');
+}
+
+// ─── God Eye ───
+let sseSource = null;
+let sseConnected = false;
+
+function toggleSSE() {
+  if (sseConnected) { disconnectSSE(); } else { connectSSE(); }
+}
+
+function connectSSE() {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(API + '/api/v1/events/stream');
+  sseSource.onopen = () => {
+    sseConnected = true;
+    const btn = document.getElementById('sseToggle');
+    if (btn) { btn.style.background = 'var(--success)'; btn.textContent = '● Connected'; }
+  };
+  sseSource.onerror = () => {
+    sseConnected = false;
+    const btn = document.getElementById('sseToggle');
+    if (btn) { btn.style.background = 'var(--danger)'; btn.textContent = '○ Disconnected'; }
+  };
+  sseSource.addEventListener('agent.started', (e) => addFeedEvent(JSON.parse(e.data), '🚀'));
+  sseSource.addEventListener('agent.completed', (e) => addFeedEvent(JSON.parse(e.data), '✅'));
+  sseSource.addEventListener('agent.failed', (e) => addFeedEvent(JSON.parse(e.data), '❌'));
+  sseSource.addEventListener('tool.called', (e) => addFeedEvent(JSON.parse(e.data), '🔧'));
+  sseSource.addEventListener('daemon.started', (e) => addFeedEvent(JSON.parse(e.data), '👁️'));
+  sseSource.addEventListener('daemon.cycle', (e) => addFeedEvent(JSON.parse(e.data), '🔄'));
+  sseSource.addEventListener('daemon.alert', (e) => addFeedEvent(JSON.parse(e.data), '🚨'));
+  sseSource.addEventListener('daemon.stopped', (e) => addFeedEvent(JSON.parse(e.data), '⏹️'));
+  sseSource.addEventListener('chain.started', (e) => addFeedEvent(JSON.parse(e.data), '🔗'));
+  sseSource.addEventListener('chain.completed', (e) => addFeedEvent(JSON.parse(e.data), '🏁'));
+  sseSource.addEventListener('schedule.fired', (e) => addFeedEvent(JSON.parse(e.data), '⏰'));
+  sseSource.addEventListener('connected', () => addFeedEvent({message:'God-eye connected',timestamp:new Date().toISOString()}, '📡'));
+}
+
+function disconnectSSE() {
+  if (sseSource) sseSource.close();
+  sseConnected = false;
+  const btn = document.getElementById('sseToggle');
+  if (btn) { btn.style.background = 'var(--border)'; btn.textContent = '○ Disconnected'; }
+}
+
+function addFeedEvent(data, icon) {
+  const feed = document.getElementById('eventFeed');
+  if (!feed) return;
+  const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : '';
+  const name = data.agent_name || data.agent_type || '';
+  const msg = data.message || data.event_type || '';
+  const el = document.createElement('div');
+  el.style.cssText = 'padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px;';
+  el.innerHTML = '<span style="opacity:0.5">' + time + '</span> ' + icon + ' <strong>' + name + '</strong> ' + msg.substring(0,120);
+  // If alert, highlight
+  if (data.event_type === 'daemon.alert') el.style.borderColor = 'var(--danger)';
+  feed.prepend(el);
+  // Keep feed manageable
+  while (feed.children.length > 100) feed.removeChild(feed.lastChild);
+  // Update stats
+  refreshGodEye();
+}
+
+async function refreshGodEye() {
+  try {
+    const r = await fetch(API + '/api/v1/god-eye');
+    const d = await r.json();
+    const ge = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    ge('geActiveAgents', (d.live?.active_agents || d.db?.running || 0));
+    ge('geActiveDaemons', d.live?.active_daemons || 0);
+    ge('geTotalEvents', d.live?.total_events || 0);
+  } catch(e) {}
+}
+
+async function loadDaemons() {
+  try {
+    // Load presets into dropdown
+    const pr = await fetch(API + '/api/v1/daemons/presets');
+    const presets = await pr.json();
+    const sel = document.getElementById('daemonPreset');
+    if (sel && presets.presets) {
+      sel.innerHTML = '<option value="">Select preset...</option>';
+      for (const [id, p] of Object.entries(presets.presets)) {
+        sel.innerHTML += '<option value="' + id + '">' + p.name + ' (' + p.interval + 's)</option>';
+      }
+    }
+
+    // Load active daemons
+    const dr = await fetch(API + '/api/v1/daemons', { headers: headers() });
+    const data = await dr.json();
+    const list = document.getElementById('daemonList');
+    if (!list) return;
+    if (!data.daemons || data.daemons.length === 0) {
+      list.innerHTML = '<div class="empty-state" style="padding:30px"><div class="icon">👁️</div><p>No daemons running</p></div>';
+      return;
+    }
+    let html = '';
+    for (const d of data.daemons) {
+      const statusColor = d.status === 'running' ? 'var(--success)' : 'var(--danger)';
+      html += '<div class="schedule-row">' +
+        '<div class="schedule-info">' +
+          '<div class="sched-agent" style="color:' + statusColor + '">' + (d.status === 'running' ? '🟢' : '🔴') + ' ' + d.agent_name + '</div>' +
+          '<div class="sched-task">' + (d.task || '').substring(0,80) + '</div>' +
+          '<div class="sched-cron">Cycles: ' + d.cycles + ' | Every ' + d.interval_seconds + 's | ID: ' + d.daemon_id.substring(0,8) + '</div>' +
+        '</div>' +
+        '<div class="schedule-actions">' +
+          (d.status === 'running' ? '<button class="btn btn-danger btn-sm" onclick="stopDaemon(\'' + d.daemon_id + '\')">Stop</button>' : '') +
+        '</div>' +
+      '</div>';
+    }
+    list.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function startDaemon() {
+  const presetId = document.getElementById('daemonPreset').value;
+  if (!presetId) return alert('Select a daemon preset');
+  try {
+    await fetch(API + '/api/v1/daemons', {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ preset_id: presetId })
+    });
+    loadDaemons();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function stopDaemon(id) {
+  if (!confirm('Stop this daemon?')) return;
+  await fetch(API + '/api/v1/daemons/' + id, { method: 'DELETE', headers: headers() });
+  loadDaemons();
 }
 
 // ─── Init ───
