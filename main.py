@@ -88,7 +88,7 @@ except ImportError:
 # Smart knowledge (optional)
 SMART_KNOWLEDGE = False
 try:
-    from smart_knowledge import get_relevant_knowledge, score_knowledge
+    from smart_knowledge import get_relevant_knowledge, compute_relevance
     SMART_KNOWLEDGE = True
     logger.info("✅ smart_knowledge loaded")
 except ImportError:
