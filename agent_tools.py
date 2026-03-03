@@ -304,8 +304,20 @@ def tool_run_code(code: str) -> str:
 
 # ─── TOOL DISPATCHER ──────────────────────────────────────
 
-async def execute_tool(tool_name: str, tool_input: dict) -> str:
-    """Execute a tool call and return the result string."""
+# MCP registry reference (set by main.py at startup)
+_mcp_registry = None
+_mcp_user_key = None
+
+
+def set_mcp_registry(registry, user_key_col="user_api_key"):
+    """Called by main.py to wire MCP registry into tool execution."""
+    global _mcp_registry
+    _mcp_registry = registry
+
+
+async def execute_tool(tool_name: str, tool_input: dict, user_api_key: str = None) -> str:
+    """Execute a tool call and return the result string.
+    Built-in tools are handled directly. Unknown tools are routed to MCP registry."""
     try:
         if tool_name == "web_search":
             return await tool_web_search(tool_input.get("query", ""))
@@ -319,10 +331,61 @@ async def execute_tool(tool_name: str, tool_input: dict) -> str:
         elif tool_name == "run_code":
             return tool_run_code(tool_input.get("code", ""))
         else:
+            # Route to MCP registry for user-registered tools
+            if _mcp_registry and user_api_key:
+                return await _execute_mcp_tool(tool_name, tool_input, user_api_key)
             return f"Unknown tool: {tool_name}"
     except Exception as e:
         logger.error(f"Tool execution error ({tool_name}): {e}")
         return f"Tool error: {str(e)}"
+
+
+async def _execute_mcp_tool(tool_name: str, tool_input: dict, user_api_key: str) -> str:
+    """Find and execute a registered MCP tool by name."""
+    try:
+        # Find tool by name
+        tools = await _mcp_registry.get_tools(user_api_key)
+        tool_match = None
+        for t in tools:
+            # Match by exact name or tool_id
+            if t["name"].lower().replace(" ", "_") == tool_name.lower() or t["tool_id"] == tool_name:
+                tool_match = t
+                break
+
+        if not tool_match:
+            return f"MCP tool '{tool_name}' not found in your registered tools"
+
+        result = await _mcp_registry.execute_tool(tool_match["tool_id"], user_api_key, input_data=tool_input)
+        if "error" in result:
+            return f"MCP tool error: {result['error']}"
+
+        # Format result for Claude
+        return f"MCP Tool '{tool_match['name']}' result (HTTP {result.get('status_code', '?')}):\n{json.dumps(result.get('result', {}), indent=2)[:4000]}"
+    except Exception as e:
+        logger.error(f"MCP tool execution failed ({tool_name}): {e}")
+        return f"MCP tool error: {str(e)}"
+
+
+def get_mcp_tool_definitions(mcp_tools: list[dict]) -> list[dict]:
+    """Convert registered MCP tools into Claude tool_use format."""
+    defs = []
+    for t in mcp_tools:
+        tool_name = t["name"].lower().replace(" ", "_").replace("-", "_")
+        defs.append({
+            "name": tool_name,
+            "description": f"[MCP] {t['description']}. Calls: {t['method']} {t['endpoint_url'][:80]}",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "input_data": {
+                        "type": "object",
+                        "description": "Key-value pairs to pass to the API. Keys will be substituted into URL template {placeholders} and request body.",
+                    },
+                },
+                "required": [],
+            },
+        })
+    return defs
 
 
 # ─── AGENTIC EXECUTION (multi-turn with tools) ────────────
@@ -334,14 +397,22 @@ async def execute_with_tools(
     user_message: str,
     tools: list[dict],
     max_turns: int = 5,
+    user_api_key: str = None,
+    mcp_tools: list[dict] = None,
 ) -> str:
     """
     Run Claude with tool use in a loop.
-    Claude can call tools, get results, and continue reasoning.
+    Claude can call built-in tools AND registered MCP tools.
     Returns the final text response.
     """
     messages = [{"role": "user", "content": user_message}]
     final_text = ""
+
+    # Merge built-in tools with MCP tool definitions
+    all_tools = list(tools)
+    if mcp_tools:
+        mcp_defs = get_mcp_tool_definitions(mcp_tools)
+        all_tools.extend(mcp_defs)
 
     for turn in range(max_turns):
         async with httpx.AsyncClient(timeout=45.0) as client:
@@ -351,8 +422,8 @@ async def execute_with_tools(
                 "system": system_prompt,
                 "messages": messages,
             }
-            if tools:
-                payload["tools"] = tools
+            if all_tools:
+                payload["tools"] = all_tools
 
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
@@ -393,7 +464,7 @@ async def execute_with_tools(
         tool_results = []
         for tc in tool_calls:
             logger.info(f"Tool call: {tc['name']}({json.dumps(tc.get('input', {}))[:100]})")
-            result = await execute_tool(tc["name"], tc.get("input", {}))
+            result = await execute_tool(tc["name"], tc.get("input", {}), user_api_key=user_api_key)
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tc["id"],
