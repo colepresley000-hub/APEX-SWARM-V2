@@ -182,6 +182,18 @@ try:
 except ImportError:
     logger.warning("⚠️ a2a_protocol not found — no agent-to-agent delegation")
 
+# Autonomous Goal System
+GOALS_AVAILABLE = False
+goal_engine = None
+try:
+    from autonomous_goals import GoalEngine, ROLES, EMAIL_PERMISSIONS, COMPETITOR_DAEMON_CONFIG, get_tools_for_role, check_email_permission
+    GOALS_AVAILABLE = True
+    logger.info("✅ autonomous_goals loaded — goal system, role permissions, org charts")
+except ImportError:
+    ROLES = {}
+    COMPETITOR_DAEMON_CONFIG = {}
+    logger.warning("⚠️ autonomous_goals not found — no goal system")
+
 # Smart knowledge (optional)
 SMART_KNOWLEDGE = False
 try:
@@ -717,6 +729,18 @@ def init_db():
         a2a_engine = A2AEngine(AGENTS, execute_task, _a2a_llm_call)
         a2a_engine.set_db(get_db, USER_KEY_COL)
         logger.info("✅ A2A engine initialized — agent delegation active")
+
+    # Initialize Goal Engine
+    if GOALS_AVAILABLE:
+        global goal_engine
+        goal_engine = GoalEngine(AGENTS, execute_task, _a2a_llm_call if A2A_AVAILABLE else None)
+        goal_engine.set_db(get_db, USER_KEY_COL)
+        logger.info("✅ Goal engine initialized — autonomous goals active")
+
+    # Add competitor tracking daemon preset
+    if GOALS_AVAILABLE and MISSION_CONTROL and COMPETITOR_DAEMON_CONFIG:
+        DAEMON_PRESETS["competitor-intel"] = COMPETITOR_DAEMON_CONFIG
+        logger.info("✅ Competitor tracking daemon preset added")
 
 
 # ─── COST TRACKING ────────────────────────────────────────
@@ -1683,6 +1707,7 @@ async def health():
         "marketplace": MARKETPLACE_AVAILABLE,
         "voice": VOICE_AVAILABLE,
         "a2a_protocol": A2A_AVAILABLE,
+        "autonomous_goals": GOALS_AVAILABLE,
     }
 
 
@@ -2348,6 +2373,95 @@ async def check_rate_limit(api_key: str = Depends(get_api_key)):
     if not rate_limiter:
         return {"message": "Rate limiting not active"}
     return rate_limiter.get_usage(api_key, "starter")
+
+
+# ─── AUTONOMOUS GOAL ENDPOINTS ───────────────────────────
+
+class GoalRequest(BaseModel):
+    title: str
+    description: str
+    budget_usd: float = 0.0
+    org_roles: list = ["ceo", "researcher", "writer", "analyst"]
+    model: Optional[str] = None
+    auto_execute: bool = True
+
+
+@app.post("/api/v1/goals")
+async def create_goal(req: GoalRequest, api_key: str = Depends(get_api_key)):
+    if not GOALS_AVAILABLE or not goal_engine:
+        raise HTTPException(status_code=503, detail="Goal system not loaded")
+    goal = await goal_engine.create_goal(
+        title=req.title, description=req.description,
+        user_api_key=api_key, budget_usd=req.budget_usd,
+        org_roles=req.org_roles, model=req.model,
+        auto_execute=req.auto_execute,
+    )
+    return goal.to_dict()
+
+
+@app.get("/api/v1/goals")
+async def list_goals(api_key: str = Depends(get_api_key)):
+    if not GOALS_AVAILABLE or not goal_engine:
+        return {"goals": []}
+    return {"goals": goal_engine.list_goals(api_key)}
+
+
+@app.get("/api/v1/goals/{goal_id}")
+async def get_goal(goal_id: str):
+    if not GOALS_AVAILABLE or not goal_engine:
+        raise HTTPException(status_code=503)
+    goal = goal_engine.get_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return goal
+
+
+@app.get("/api/v1/goals/{goal_id}/report")
+async def goal_report(goal_id: str, api_key: str = Depends(get_api_key)):
+    if not GOALS_AVAILABLE or not goal_engine:
+        raise HTTPException(status_code=503)
+    report = await goal_engine.get_progress_report(goal_id)
+    return {"report": report}
+
+
+@app.post("/api/v1/goals/{goal_id}/pause")
+async def pause_goal(goal_id: str, api_key: str = Depends(get_api_key)):
+    if not GOALS_AVAILABLE or not goal_engine:
+        raise HTTPException(status_code=503)
+    goal_engine.pause_goal(goal_id)
+    return {"status": "paused"}
+
+
+@app.get("/api/v1/goals/stats/overview")
+async def goal_stats():
+    if not GOALS_AVAILABLE or not goal_engine:
+        return {"total_goals": 0}
+    return goal_engine.get_stats()
+
+
+@app.get("/api/v1/roles")
+async def list_roles():
+    if not GOALS_AVAILABLE:
+        return {"roles": []}
+    return {"roles": [
+        {"role_id": rid, "name": r["name"], "icon": r["icon"], "description": r["description"],
+         "tool_count": len(r["tools"]), "can_delegate": r["can_delegate"],
+         "email_permissions": EMAIL_PERMISSIONS.get(rid, {})}
+        for rid, r in ROLES.items()
+    ]}
+
+
+@app.get("/api/v1/roles/{role_id}")
+async def get_role(role_id: str):
+    if not GOALS_AVAILABLE:
+        raise HTTPException(status_code=503)
+    role = ROLES.get(role_id)
+    if not role:
+        raise HTTPException(status_code=404)
+    return {
+        "role_id": role_id, **role,
+        "email_permissions": EMAIL_PERMISSIONS.get(role_id, {}),
+    }
 
 
 # ─── A2A PROTOCOL ENDPOINTS ──────────────────────────────
@@ -3300,6 +3414,10 @@ a{color:var(--green);text-decoration:none}
         <span class="nav-icon">🔗</span> Agent-to-Agent
         <span class="nav-badge">NEW</span>
       </div>
+      <div class="nav-item" data-page="goals" onclick="navigate('goals')">
+        <span class="nav-icon">🎯</span> Goals
+        <span class="nav-badge">NEW</span>
+      </div>
       <div class="nav-item" data-page="schedules" onclick="navigate('schedules')">
         <span class="nav-icon">🕐</span> Schedules
       </div>
@@ -3352,7 +3470,7 @@ function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
   const main = document.getElementById('mainContent');
   main.innerHTML = '<div style="display:flex;justify-content:center;padding:40px"><div class="spinner"></div></div>';
-  const pages = {overview:renderOverview,deploy:renderDeploy,agents:renderAgents,feed:renderFeed,marketplace:renderMarketplace,'create-agent':renderCreateAgent,'my-store':renderMyStore,workflows:renderWorkflows,daemons:renderDaemons,a2a:renderA2A,models:renderModels,channels:renderChannels,settings:renderSettings,schedules:renderSchedules};
+  const pages = {overview:renderOverview,deploy:renderDeploy,agents:renderAgents,feed:renderFeed,marketplace:renderMarketplace,'create-agent':renderCreateAgent,'my-store':renderMyStore,workflows:renderWorkflows,daemons:renderDaemons,a2a:renderA2A,goals:renderGoals,models:renderModels,channels:renderChannels,settings:renderSettings,schedules:renderSchedules};
   (pages[page] || renderOverview)();
 }
 
@@ -3377,7 +3495,7 @@ async function renderOverview() {
         <div class="card">
           <div class="card-header"><div class="card-title">System Status</div></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            ${Object.entries({Tools:h.tools,Chains:h.chains,Knowledge:h.knowledge,'Mission Control':h.mission_control,Memory:h.swarm_memory,MCP:h.mcp_registry,'Multi-Model':h.multi_model,Marketplace:h.marketplace,Voice:h.voice,Workflows:h.workflows,'A2A Protocol':h.a2a_protocol}).map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 0"><span>${v?'🟢':'🔴'}</span>${k}</div>`).join('')}
+            ${Object.entries({Tools:h.tools,Chains:h.chains,Knowledge:h.knowledge,'Mission Control':h.mission_control,Memory:h.swarm_memory,MCP:h.mcp_registry,'Multi-Model':h.multi_model,Marketplace:h.marketplace,Voice:h.voice,Workflows:h.workflows,'A2A Protocol':h.a2a_protocol,'Goals':h.autonomous_goals}).map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 0"><span>${v?'🟢':'🔴'}</span>${k}</div>`).join('')}
           </div>
         </div>
         <div class="card">
@@ -3737,6 +3855,83 @@ async function renderDaemons() {
 
 async function startDaemon(id) { await api('/api/v1/daemons/start', {method:'POST', body:JSON.stringify({preset_id:id})}); renderDaemons(); }
 async function stopDaemon(id) { await api('/api/v1/daemons/'+id+'/stop', {method:'POST'}); renderDaemons(); }
+
+// ─── GOALS ───────────────────────────────────────
+async function renderGoals() {
+  const [goals, roles, stats] = await Promise.all([api('/api/v1/goals'), api('/api/v1/roles'), api('/api/v1/goals/stats/overview')]);
+  const goalList = (goals.goals || []).slice().reverse();
+  const roleList = roles.roles || [];
+  const s = stats || {};
+  document.getElementById('mainContent').innerHTML = `
+    <div class="fade-in">
+      <h2 style="font-size:24px;font-weight:700;margin-bottom:4px">🎯 Autonomous Goals</h2>
+      <p style="color:var(--text2);margin-bottom:20px">Give a high-level goal — the swarm builds the org, assigns roles, and executes</p>
+      <div class="grid-3" style="margin-bottom:24px">
+        <div class="stat"><div class="stat-value">${s.total_goals||0}</div><div class="stat-label">Goals</div></div>
+        <div class="stat"><div class="stat-value">${s.total_tasks||0}</div><div class="stat-label">Total Tasks</div></div>
+        <div class="stat"><div class="stat-value">${s.available_roles||0}</div><div class="stat-label">Available Roles</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title" style="margin-bottom:12px">Launch New Goal</div>
+          <div class="deploy-form">
+            <div class="form-group"><label class="form-label">Goal</label><input class="form-input" id="goalTitle" placeholder="e.g. Launch a DeFi analytics newsletter"></div>
+            <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" id="goalDesc" placeholder="Detailed description of what you want to achieve..."></textarea></div>
+            <div class="form-group"><label class="form-label">Team Roles</label>
+              <div style="display:flex;flex-wrap:wrap;gap:6px" id="goalRoles">${roleList.map(r=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;background:var(--surface2);border-radius:6px;cursor:pointer"><input type="checkbox" value="${r.role_id}" ${['ceo','researcher','writer','analyst'].includes(r.role_id)?'checked':''}> ${r.icon} ${r.name}</label>`).join('')}</div>
+            </div>
+            <button class="btn btn-primary btn-lg" onclick="launchGoal()" id="goalBtn">🎯 Launch Goal</button>
+            <div id="goalResult" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:12px">Org Chart — Role Permissions</div>
+          <div style="max-height:350px;overflow-y:auto">${roleList.map(r=>`
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+              <span style="font-size:20px">${r.icon}</span>
+              <div style="flex:1"><strong>${r.name}</strong><br><span style="color:var(--text2);font-size:11px">${r.description}</span></div>
+              <span style="font-size:11px;color:var(--text2)">${r.tool_count} tools</span>
+              ${r.can_delegate?'<span style="font-size:10px;color:var(--green)">DELEGATE</span>':''}
+            </div>`).join('')}</div>
+        </div>
+      </div>
+      ${goalList.length ? `<h3 style="font-size:16px;margin:20px 0 12px">Goals</h3>` + goalList.map(g => `
+        <div class="card" style="margin-bottom:12px;cursor:pointer" onclick="showGoal('${g.goal_id}')">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>🎯 ${g.title}</strong><br><span style="color:var(--text2);font-size:12px">${g.projects_count} projects · ${g.tasks_total} tasks · ${g.org_roles.length} roles</span></div>
+            <div style="text-align:right"><div style="font-size:20px;font-weight:700;color:var(--green)">${g.progress}%</div><div style="font-size:11px;color:${g.status==='completed'?'var(--green)':'var(--orange)'}">${g.status}</div></div>
+          </div>
+          <div style="margin-top:8px;height:4px;background:var(--surface2);border-radius:2px"><div style="height:100%;width:${g.progress}%;background:var(--green);border-radius:2px"></div></div>
+        </div>`).join('') : ''}
+    </div>`;
+}
+
+async function launchGoal() {
+  const btn = document.getElementById('goalBtn');
+  btn.innerHTML = '<div class="spinner"></div> Running...';
+  btn.disabled = true;
+  const roles = [...document.querySelectorAll('#goalRoles input:checked')].map(i=>i.value);
+  const r = await api('/api/v1/goals', {method:'POST', body:JSON.stringify({title:document.getElementById('goalTitle').value, description:document.getElementById('goalDesc').value, org_roles:roles})});
+  btn.innerHTML = '🎯 Launch Goal';
+  btn.disabled = false;
+  const el = document.getElementById('goalResult');
+  if (r.goal_id) {
+    el.innerHTML = `<div style="background:var(--greenbg);border:1px solid var(--green);border-radius:8px;padding:12px">✅ Goal completed! ${r.projects_count} projects, ${r.tasks_completed}/${r.tasks_total} tasks done. <strong>${r.progress}%</strong><br><button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="showGoal('${r.goal_id}')">View Details</button></div>`;
+  } else {
+    el.innerHTML = `<div style="color:var(--red)">❌ ${r.detail||r.error||'Failed'}</div>`;
+  }
+}
+
+async function showGoal(goalId) {
+  const g = await api('/api/v1/goals/'+goalId);
+  if (!g || g.error) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+  const projHtml = (g.projects||[]).map(p => `<div style="margin-bottom:16px"><h4>${p.title} <span style="color:var(--text2);font-size:12px">${p.progress}%</span></h4>${(p.tasks||[]).map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)"><span>${t.role_icon}</span><div class="agent-status ${t.status}"></div><strong style="font-size:12px">${t.role_name}</strong><span style="flex:1;font-size:12px;color:var(--text2)">${t.title}</span><span style="font-size:11px;color:${t.status==='completed'?'var(--green)':'var(--red)'}">${t.status}</span></div>`).join('')}</div>`).join('');
+  overlay.innerHTML = `<div class="modal"><div class="modal-title">🎯 ${g.title}</div><div style="color:var(--text2);font-size:12px;margin-bottom:16px">${g.status} · ${g.progress}% · ${g.tasks_completed}/${g.tasks_total} tasks</div><div style="margin-bottom:12px;display:flex;gap:6px">${(g.org_roles||[]).map(r=>{const role=g.org_chart?.find(c=>c.role===r)||{};return`<span style="font-size:10px;padding:3px 8px;background:var(--surface2);border-radius:4px">${role.icon||'🤖'} ${role.name||r}</span>`}).join('')}</div>${projHtml}<button class="btn btn-secondary" style="margin-top:12px" onclick="this.closest('.modal-overlay').remove()">Close</button></div>`;
+  document.body.appendChild(overlay);
+}
 
 // ─── A2A PROTOCOL ────────────────────────────────
 async function renderA2A() {
