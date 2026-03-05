@@ -549,6 +549,20 @@ def init_db():
                     pass
             conn.commit()
             logger.info("✅ PostgreSQL database initialized")
+
+            # Migration: add missing columns if they don't exist
+            migration_columns = [
+                ("knowledge", "pattern", "TEXT DEFAULT ''"),
+                ("knowledge", "source_url", "TEXT DEFAULT ''"),
+                ("knowledge", "tags", "TEXT DEFAULT '[]'"),
+            ]
+            for table, col, col_type in migration_columns:
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                    conn.commit()
+                    logger.info(f"✅ Migration: added {table}.{col}")
+                except Exception:
+                    pass  # Column already exists
         else:
             # SQLite fallback — detect old schema
             try:
