@@ -555,6 +555,15 @@ def init_db():
                 ("knowledge", "pattern", "TEXT DEFAULT ''"),
                 ("knowledge", "source_url", "TEXT DEFAULT ''"),
                 ("knowledge", "tags", "TEXT DEFAULT '[]'"),
+                ("knowledge", "success_count", "INTEGER DEFAULT 0"),
+                ("knowledge", "fail_count", "INTEGER DEFAULT 0"),
+                ("knowledge", "relevance_score", "REAL DEFAULT 0.0"),
+                ("knowledge", "embedding", "TEXT DEFAULT ''"),
+                ("knowledge", "metadata", "TEXT DEFAULT '{}'"),
+                ("knowledge", "expires_at", "TEXT DEFAULT ''"),
+                ("knowledge", "category", "TEXT DEFAULT 'general'"),
+                ("knowledge", "source_agent", "TEXT DEFAULT ''"),
+                ("knowledge", "version", "INTEGER DEFAULT 1"),
             ]
             for table, col, col_type in migration_columns:
                 try:
