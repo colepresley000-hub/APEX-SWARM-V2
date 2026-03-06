@@ -1070,22 +1070,25 @@ async def get_validated_user(x_api_key: str = Header(None), authorization: str =
 
 def get_knowledge_for_agent(user_api_key: str, agent_type: str, task: str = "") -> str:
     """Get relevant knowledge entries for context injection."""
-    conn = get_db()
     try:
-        if SMART_KNOWLEDGE and task:
-            return get_relevant_knowledge(conn, user_api_key, agent_type, task)
+        conn = get_db()
+        try:
+            if SMART_KNOWLEDGE and task:
+                return get_relevant_knowledge(conn, user_api_key, agent_type, task)
 
-        rows = conn.execute(
-            f"SELECT content FROM knowledge WHERE {USER_KEY_COL} = ? AND agent_type = ? ORDER BY created_at DESC LIMIT 10",
-            (user_api_key, agent_type),
-        ).fetchall()
-        if not rows:
-            return ""
-        entries = [r[0] for r in rows]
-        return "\n\n## Relevant Knowledge:\n" + "\n---\n".join(entries)
-    finally:
-        conn.close()
-
+            rows = conn.execute(
+                f"SELECT content FROM knowledge WHERE {USER_KEY_COL} = ? AND agent_type = ? ORDER BY created_at DESC LIMIT 10",
+                (user_api_key, agent_type),
+            ).fetchall()
+            if not rows:
+                return ""
+            entries = [r[0] for r in rows]
+            return "\n\n## Relevant Knowledge:\n" + "\n---\n".join(entries)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Knowledge retrieval failed (non-fatal): {e}")
+        return ""
 
 # ─── CORE EXECUTION ──────────────────────────────────────
 
