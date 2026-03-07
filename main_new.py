@@ -21,7 +21,7 @@ from pydantic import BaseModel, EmailStr
 
 # ─── CONFIG
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+CLAUDE_MODEL = "claude-haiku-4-5"
 MONTHLY_AGENT_LIMIT = int(os.getenv("MONTHLY_AGENT_LIMIT", "20"))
 
 # ─── AGENT REGISTRY (add new agents here, no code changes needed)

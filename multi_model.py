@@ -40,9 +40,9 @@ PROVIDERS = {
         "models": {
             "claude-opus-4-6": {"name": "Claude Opus 4.6", "context": 200000, "vision": True, "cost_1m_in": 15.0, "cost_1m_out": 75.0},
             "claude-sonnet-4-5-20250929": {"name": "Claude Sonnet 4.5", "context": 200000, "vision": True, "cost_1m_in": 3.0, "cost_1m_out": 15.0},
-            "claude-haiku-4-5-20241022": {"name": "Claude Haiku 4.5", "context": 200000, "vision": True, "cost_1m_in": 0.80, "cost_1m_out": 4.0},
+            "claude-haiku-4-5": {"name": "Claude Haiku 4.5", "context": 200000, "vision": True, "cost_1m_in": 0.80, "cost_1m_out": 4.0},
         },
-        "default": "claude-haiku-4-5-20241022",
+        "default": "claude-haiku-4-5",
     },
     "openai": {
         "name": "OpenAI",
