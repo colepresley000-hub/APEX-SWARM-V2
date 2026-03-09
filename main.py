@@ -3409,910 +3409,450 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>APEX SWARM v4 — Command Center</title>
+<title>APEX SWARM — Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;800;900&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
+
 :root{
-  --bg:#050508;--surface:#0c0c14;--surface2:#13131f;--surface3:#1a1a2a;
-  --border:#252538;--border2:#353548;
-  --text:#e4e4f0;--text2:#8888a8;--text3:#5555708;
-  --green:#00ff88;--green2:#00cc6a;--greenbg:rgba(0,255,136,0.08);
-  --red:#ff4466;--redbg:rgba(255,68,102,0.08);
-  --blue:#4488ff;--bluebg:rgba(68,136,255,0.08);
-  --purple:#8855ff;--purplebg:rgba(136,85,255,0.08);
-  --orange:#ff8844;--orangebg:rgba(255,136,68,0.08);
-  --yellow:#ffcc00;
-  --radius:10px;--radius2:16px;
+  --bg:#06060a;--bg2:#0a0a12;--surface:#0e0e18;--surface2:#141422;--surface3:#1a1a2e;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
+  --text:#f0f0f8;--text2:#8888a8;--text3:#555570;
+  --mint:#00f0a0;--mint2:#00cc80;--mintbg:rgba(0,240,160,0.06);--mintglow:rgba(0,240,160,0.15);
+  --cyan:#00d4ff;--cyanbg:rgba(0,212,255,0.06);
+  --amber:#ffb800;--amberbg:rgba(255,184,0,0.06);
+  --rose:#ff3366;--rosebg:rgba(255,51,102,0.06);
+  --violet:#7733ff;--violetbg:rgba(119,51,255,0.06);
 }
-body{background:var(--bg);color:var(--text);font-family:'Outfit',sans-serif;overflow-x:hidden;min-height:100vh}
-a{color:var(--green);text-decoration:none}
-::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--surface)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+html{font-size:15px}
+body{background:var(--bg);color:var(--text);font-family:'Instrument Sans',sans-serif;overflow-x:hidden;min-height:100vh}
+::selection{background:var(--mint);color:var(--bg)}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ─── GRAIN OVERLAY ─── */
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+}
 
 /* ─── LAYOUT ─── */
-.app{display:grid;grid-template-columns:240px 1fr;grid-template-rows:60px 1fr;height:100vh}
-.topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;z-index:100}
-.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:16px 12px;overflow-y:auto}
-.main{overflow-y:auto;padding:24px;background:var(--bg)}
-
-/* ─── TOPBAR ─── */
-.logo{font-family:'Space Mono',monospace;font-weight:700;font-size:18px;color:var(--green);letter-spacing:-0.5px}
-.logo span{color:var(--text2);font-weight:400;font-size:13px;margin-left:8px}
-.topbar-right{display:flex;align-items:center;gap:16px}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-.api-key-input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;font-size:12px;width:200px;font-family:'Space Mono',monospace}
-.api-key-input::placeholder{color:var(--text2)}
+.app{display:grid;grid-template-columns:260px 1fr;grid-template-rows:1fr;height:100vh}
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.main{overflow-y:auto;position:relative}
 
 /* ─── SIDEBAR ─── */
-.nav-section{margin-bottom:24px}
-.nav-label{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--text2);padding:0 12px;margin-bottom:8px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;color:var(--text2);transition:all 0.15s}
-.nav-item:hover{background:var(--surface2);color:var(--text)}
-.nav-item.active{background:var(--greenbg);color:var(--green);font-weight:500}
-.nav-icon{font-size:18px;width:24px;text-align:center}
-.nav-badge{margin-left:auto;background:var(--green);color:var(--bg);font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px}
+.sidebar-header{padding:28px 24px 20px;border-bottom:1px solid var(--border)}
+.logo-mark{font-family:'Playfair Display',serif;font-weight:900;font-size:22px;letter-spacing:-0.5px;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo-sub{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:3px;text-transform:uppercase;margin-top:6px}
+
+.nav-group{padding:20px 12px}
+.nav-group-label{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--text3);padding:0 12px;margin-bottom:10px}
+.nav-btn{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:13.5px;color:var(--text2);transition:all 0.2s;border:1px solid transparent;margin-bottom:2px}
+.nav-btn:hover{color:var(--text);background:rgba(255,255,255,0.03)}
+.nav-btn.active{color:var(--mint);background:var(--mintbg);border-color:rgba(0,240,160,0.1)}
+.nav-btn .icon{font-size:17px;width:24px;text-align:center;opacity:0.8}
+.nav-btn.active .icon{opacity:1}
+.nav-badge{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9px;background:var(--mint);color:var(--bg);padding:2px 7px;border-radius:8px;font-weight:600}
+
+.sidebar-footer{margin-top:auto;padding:16px 24px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 12px var(--mintglow);animation:breathe 3s ease infinite}
+@keyframes breathe{0%,100%{opacity:1;box-shadow:0 0 12px var(--mintglow)}50%{opacity:0.5;box-shadow:0 0 4px var(--mintglow)}}
+.sidebar-status{font-size:11px;color:var(--text2)}
+.sidebar-status span{color:var(--mint);font-weight:600}
+
+/* ─── MAIN CONTENT ─── */
+.page{padding:32px 36px;max-width:1400px}
+.page-header{margin-bottom:28px}
+.page-title{font-family:'Playfair Display',serif;font-size:32px;font-weight:800;letter-spacing:-0.5px}
+.page-subtitle{color:var(--text2);font-size:14px;margin-top:6px}
+
+/* ─── METRIC CARDS ─── */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.metric{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;position:relative;overflow:hidden;transition:border-color 0.3s}
+.metric:hover{border-color:var(--border2)}
+.metric::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--mint),transparent);opacity:0;transition:opacity 0.3s}
+.metric:hover::after{opacity:1}
+.metric-val{font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:600;line-height:1}
+.metric-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-top:8px}
+.metric-change{font-size:11px;margin-top:6px;font-family:'IBM Plex Mono',monospace}
+.metric-change.up{color:var(--mint)}
+.metric-change.down{color:var(--rose)}
 
 /* ─── CARDS ─── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:20px;transition:border-color 0.2s}
-.card:hover{border-color:var(--border2)}
-.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.card-title{font-weight:600;font-size:16px}
-.card-subtitle{color:var(--text2);font-size:13px;margin-top:4px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.card-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.card-body{padding:18px 22px}
+
+/* ─── GRIDS ─── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.g23{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+.g32{display:grid;grid-template-columns:1fr 2fr;gap:14px}
 
 /* ─── BUTTONS ─── */
-.btn{padding:8px 16px;border-radius:8px;border:none;font-family:'Outfit',sans-serif;font-weight:500;font-size:13px;cursor:pointer;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
-.btn-primary{background:var(--green);color:var(--bg)}
-.btn-primary:hover{background:var(--green2);transform:translateY(-1px)}
-.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
-.btn-secondary:hover{border-color:var(--green);color:var(--green)}
-.btn-danger{background:var(--redbg);color:var(--red);border:1px solid transparent}
-.btn-danger:hover{border-color:var(--red)}
-.btn-sm{padding:5px 10px;font-size:12px}
-.btn-lg{padding:12px 24px;font-size:15px}
+.btn{padding:9px 18px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--text);font-family:'Instrument Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.2s;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--border2);background:rgba(255,255,255,0.03)}
+.btn-mint{background:var(--mint);color:var(--bg);border-color:var(--mint);font-weight:600}
+.btn-mint:hover{background:var(--mint2);transform:translateY(-1px);box-shadow:0 4px 20px var(--mintglow)}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:7px}
 
-/* ─── GRID ─── */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+/* ─── FORMS ─── */
+.input,.select,.textarea{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:9px;font-family:'Instrument Sans',sans-serif;font-size:13.5px;width:100%;outline:none;transition:border-color 0.2s}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--mint)}
+.textarea{min-height:100px;resize:vertical}
+.form-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;display:block}
 
-/* ─── STAT CARDS ─── */
-.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px}
-.stat-value{font-family:'Space Mono',monospace;font-size:28px;font-weight:700;color:var(--green)}
-.stat-label{color:var(--text2);font-size:12px;margin-top:4px;text-transform:uppercase;letter-spacing:1px}
-
-/* ─── MARKETPLACE ─── */
-.mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
-.mp-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:20px;cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden}
-.mp-card:hover{border-color:var(--green);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,255,136,0.06)}
-.mp-icon{font-size:32px;margin-bottom:12px}
-.mp-name{font-weight:600;font-size:16px;margin-bottom:4px}
-.mp-desc{color:var(--text2);font-size:13px;line-height:1.5;margin-bottom:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.mp-meta{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--text2)}
-.mp-tag{background:var(--surface2);padding:3px 8px;border-radius:4px;font-size:11px;color:var(--text2)}
-.mp-price{font-family:'Space Mono',monospace;font-weight:700;color:var(--green)}
-.mp-rating{color:var(--yellow)}
-.mp-installs{color:var(--text2)}
-.mp-category-bar{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
-.mp-cat-btn{padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:13px;cursor:pointer;transition:all 0.15s;font-family:'Outfit',sans-serif}
-.mp-cat-btn:hover,.mp-cat-btn.active{border-color:var(--green);color:var(--green);background:var(--greenbg)}
-
-/* ─── DEPLOY PANEL ─── */
-.deploy-form{display:flex;flex-direction:column;gap:12px}
-.form-group{display:flex;flex-direction:column;gap:6px}
-.form-label{font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:1px}
-.form-input,.form-select,.form-textarea{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color 0.15s}
-.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--green)}
-.form-textarea{min-height:100px;resize:vertical}
-.form-select{cursor:pointer}
-
-/* ─── AGENT LIST ─── */
-.agent-row{display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background 0.1s}
-.agent-row:hover{background:var(--surface2)}
-.agent-status{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.agent-status.running{background:var(--green);animation:pulse 2s infinite}
-.agent-status.completed{background:var(--blue)}
-.agent-status.failed{background:var(--red)}
-.agent-name{font-weight:500;font-size:14px;flex:1}
-.agent-task{color:var(--text2);font-size:12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.agent-time{color:var(--text2);font-size:12px;font-family:'Space Mono',monospace}
+/* ─── AGENT ROW ─── */
+.agent-row{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--border)}
+.agent-row:last-child{border-bottom:none}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.live{background:var(--mint);box-shadow:0 0 8px var(--mintglow);animation:breathe 2s ease infinite}
+.dot.done{background:var(--cyan)}
+.dot.err{background:var(--rose)}
+.dot.idle{background:var(--text3)}
+.agent-info{flex:1;min-width:0}
+.agent-name{font-weight:500;font-size:13.5px}
+.agent-task{color:var(--text2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agent-time{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text3)}
+.agent-badge{font-size:10px;padding:3px 8px;border-radius:6px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.badge-live{background:var(--mintbg);color:var(--mint)}
+.badge-done{background:var(--cyanbg);color:var(--cyan)}
+.badge-err{background:var(--rosebg);color:var(--rose)}
 
 /* ─── EVENT FEED ─── */
-.event{padding:10px 16px;border-left:3px solid var(--border);margin-bottom:8px;font-size:13px;background:var(--surface);border-radius:0 8px 8px 0}
-.event.agent-started{border-left-color:var(--green)}
-.event.agent-completed{border-left-color:var(--blue)}
-.event.agent-failed{border-left-color:var(--red)}
-.event.daemon-alert{border-left-color:var(--orange)}
-.event-time{color:var(--text2);font-size:11px;font-family:'Space Mono',monospace}
-.event-msg{margin-top:4px}
+.event-item{padding:10px 0;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start}
+.event-item:last-child{border-bottom:none}
+.event-dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.event-content{flex:1;font-size:13px}
+.event-time{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3)}
+
+/* ─── ORG CHART ─── */
+.org-node{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center;transition:all 0.2s}
+.org-node:hover{border-color:var(--mint);transform:translateY(-2px)}
+.org-icon{font-size:28px;margin-bottom:6px}
+.org-role{font-weight:600;font-size:13px}
+.org-tools{font-size:11px;color:var(--text3);margin-top:4px}
+
+/* ─── MARKETPLACE ─── */
+.mp-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;cursor:pointer;transition:all 0.25s;position:relative}
+.mp-card:hover{border-color:var(--mint);transform:translateY(-3px);box-shadow:0 12px 40px rgba(0,0,0,0.3)}
+.mp-card-icon{font-size:36px;margin-bottom:10px}
+.mp-card-name{font-weight:600;font-size:15px;margin-bottom:4px}
+.mp-card-desc{color:var(--text2);font-size:12.5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:12px}
+.mp-card-footer{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text3)}
+.mp-price{font-family:'IBM Plex Mono',monospace;color:var(--mint);font-weight:600}
+
+/* ─── GOAL PROGRESS ─── */
+.goal-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:14px}
+.goal-progress{height:4px;background:var(--surface3);border-radius:2px;margin-top:12px;overflow:hidden}
+.goal-fill{height:100%;background:linear-gradient(90deg,var(--mint),var(--cyan));border-radius:2px;transition:width 0.5s ease}
+
+/* ─── SYSTEM STATUS GRID ─── */
+.status-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.status-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);border-radius:8px;font-size:12px}
+.status-on{color:var(--mint)}
+.status-off{color:var(--text3)}
 
 /* ─── MODAL ─── */
-.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px)}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:28px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto}
-.modal-title{font-size:20px;font-weight:700;margin-bottom:16px}
-.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer}
-
-/* ─── WORKFLOW BUILDER ─── */
-.wf-node{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;position:relative}
-.wf-node-title{font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
-.wf-connector{width:2px;height:24px;background:var(--border);margin:0 auto}
-.wf-arrow{text-align:center;color:var(--text2);font-size:20px;margin:4px 0}
-
-/* ─── TABS ─── */
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px}
-.tab{padding:10px 20px;font-size:14px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--green);border-bottom-color:var(--green)}
-
-/* ─── RESPONSIVE ─── */
-@media(max-width:768px){.app{grid-template-columns:1fr}.sidebar{display:none}.grid-3,.grid-4{grid-template-columns:1fr 1fr}.mp-grid{grid-template-columns:1fr}}
+.modal-bg{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(8px)}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:32px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto}
 
 /* ─── ANIMATIONS ─── */
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.fade-in{animation:fadeIn 0.3s ease}
-@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
-.slide-in{animation:slideIn 0.3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp 0.4s ease}
+@keyframes slideRight{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:translateX(0)}}
+.slide-r{animation:slideRight 0.35s ease}
 
 /* ─── LOADING ─── */
-.spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin 0.6s linear infinite;display:inline-block}
-@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--mint);border-radius:50%;animation:sp 0.5s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
 
-.empty-state{text-align:center;padding:60px 20px;color:var(--text2)}
-.empty-state-icon{font-size:48px;margin-bottom:16px;opacity:0.5}
-.empty-state-text{font-size:15px;margin-bottom:20px}
+/* ─── RESPONSIVE ─── */
+@media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{display:none}.metrics{grid-template-columns:1fr 1fr}.g2,.g3,.g23,.g32{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 
 <div class="app" id="app">
-  <!-- TOPBAR -->
-  <div class="topbar">
-    <div class="logo">APEX SWARM <span>v__VERSION__</span></div>
-    <div class="topbar-right">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="status-dot" id="statusDot"></div>
-        <span style="font-size:12px;color:var(--text2)" id="statusText">Connected</span>
-      </div>
-      <input type="password" class="api-key-input" id="apiKeyInput" placeholder="API Key" />
-      <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Connect</button>
-    </div>
-  </div>
-
   <!-- SIDEBAR -->
   <div class="sidebar">
-    <div class="nav-section">
-      <div class="nav-label">Command Center</div>
-      <div class="nav-item active" data-page="overview" onclick="navigate('overview')">
-        <span class="nav-icon">👁️</span> God Eye
-      </div>
-      <div class="nav-item" data-page="deploy" onclick="navigate('deploy')">
-        <span class="nav-icon">⚡</span> Deploy Agent
-      </div>
-      <div class="nav-item" data-page="agents" onclick="navigate('agents')">
-        <span class="nav-icon">🤖</span> My Agents
-      </div>
-      <div class="nav-item" data-page="feed" onclick="navigate('feed')">
-        <span class="nav-icon">📡</span> Live Feed
-      </div>
+    <div class="sidebar-header">
+      <div class="logo-mark">APEX SWARM</div>
+      <div class="logo-sub">Command Center</div>
     </div>
-    <div class="nav-section">
-      <div class="nav-label">Marketplace</div>
-      <div class="nav-item" data-page="marketplace" onclick="navigate('marketplace')">
-        <span class="nav-icon">🏪</span> Browse Agents
-        <span class="nav-badge" id="mpBadge">NEW</span>
-      </div>
-      <div class="nav-item" data-page="create-agent" onclick="navigate('create-agent')">
-        <span class="nav-icon">🛠️</span> Create Agent
-      </div>
-      <div class="nav-item" data-page="my-store" onclick="navigate('my-store')">
-        <span class="nav-icon">💰</span> My Store
-      </div>
+
+    <div class="nav-group">
+      <div class="nav-group-label">Operations</div>
+      <div class="nav-btn active" data-p="overview" onclick="go('overview')"><span class="icon">◉</span> Overview</div>
+      <div class="nav-btn" data-p="deploy" onclick="go('deploy')"><span class="icon">⚡</span> Deploy</div>
+      <div class="nav-btn" data-p="agents" onclick="go('agents')"><span class="icon">◈</span> Agents</div>
+      <div class="nav-btn" data-p="feed" onclick="go('feed')"><span class="icon">◎</span> Live Feed</div>
     </div>
-    <div class="nav-section">
-      <div class="nav-label">Automation</div>
-      <div class="nav-item" data-page="workflows" onclick="navigate('workflows')">
-        <span class="nav-icon">⚙️</span> Workflows
-      </div>
-      <div class="nav-item" data-page="daemons" onclick="navigate('daemons')">
-        <span class="nav-icon">👁️</span> Daemons
-      </div>
-      <div class="nav-item" data-page="a2a" onclick="navigate('a2a')">
-        <span class="nav-icon">🔗</span> Agent-to-Agent
-        <span class="nav-badge">NEW</span>
-      </div>
-      <div class="nav-item" data-page="goals" onclick="navigate('goals')">
-        <span class="nav-icon">🎯</span> Goals
-        <span class="nav-badge">NEW</span>
-      </div>
-      <div class="nav-item" data-page="schedules" onclick="navigate('schedules')">
-        <span class="nav-icon">🕐</span> Schedules
-      </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Intelligence</div>
+      <div class="nav-btn" data-p="goals" onclick="go('goals')"><span class="icon">◆</span> Goals<span class="nav-badge">NEW</span></div>
+      <div class="nav-btn" data-p="a2a" onclick="go('a2a')"><span class="icon">◇</span> Swarm Delegate</div>
+      <div class="nav-btn" data-p="daemons" onclick="go('daemons')"><span class="icon">◌</span> Daemons</div>
+      <div class="nav-btn" data-p="workflows" onclick="go('workflows')"><span class="icon">⬡</span> Workflows</div>
     </div>
-    <div class="nav-section">
-      <div class="nav-label">System</div>
-      <div class="nav-item" data-page="models" onclick="navigate('models')">
-        <span class="nav-icon">🧠</span> Models
-      </div>
-      <div class="nav-item" data-page="channels" onclick="navigate('channels')">
-        <span class="nav-icon">💬</span> Channels
-      </div>
-      <div class="nav-item" data-page="settings" onclick="navigate('settings')">
-        <span class="nav-icon">⚙️</span> Settings
-      </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Platform</div>
+      <div class="nav-btn" data-p="marketplace" onclick="go('marketplace')"><span class="icon">◫</span> Marketplace</div>
+      <div class="nav-btn" data-p="models" onclick="go('models')"><span class="icon">◑</span> Models</div>
+      <div class="nav-btn" data-p="org" onclick="go('org')"><span class="icon">◰</span> Org Chart</div>
+      <div class="nav-btn" data-p="settings" onclick="go('settings')"><span class="icon">◎</span> System</div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="pulse-dot"></div>
+      <div class="sidebar-status"><span>Live</span> · v__VERSION__</div>
     </div>
   </div>
 
   <!-- MAIN -->
-  <div class="main" id="mainContent"></div>
+  <div class="main" id="main"></div>
 </div>
 
 <script>
-// ─── STATE ───────────────────────────────────────
-let API_KEY = localStorage.getItem('apex_api_key') || '';
-let BASE_URL = window.location.origin;
-let currentPage = 'overview';
-let godEyeData = {};
-let eventSource = null;
-let liveEvents = [];
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+let KEY = localStorage.getItem('apex_key') || '';
+let BASE = location.origin;
+let page = 'overview';
+let events = [];
+let sse = null;
 
-// ─── API ─────────────────────────────────────────
-async function api(path, opts = {}) {
-  const headers = { 'X-Api-Key': API_KEY, 'Content-Type': 'application/json', ...opts.headers };
+async function api(p, o = {}) {
   try {
-    const r = await fetch(BASE_URL + path, { ...opts, headers });
+    const r = await fetch(BASE + p, { ...o, headers: { 'X-Api-Key': KEY, 'Content-Type': 'application/json', ...o.headers } });
     return await r.json();
-  } catch(e) { console.error('API Error:', e); return { error: e.message }; }
+  } catch(e) { return { error: e.message }; }
 }
 
-function saveApiKey() {
-  API_KEY = document.getElementById('apiKeyInput').value;
-  localStorage.setItem('apex_api_key', API_KEY);
-  navigate(currentPage);
+function go(p) {
+  page = p;
+  $$('.nav-btn').forEach(n => n.classList.toggle('active', n.dataset.p === p));
+  $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
+  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,daemons:pDaemons,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,org:pOrg,settings:pSettings};
+  (R[p]||pOverview)();
 }
 
-// ─── NAVIGATION ──────────────────────────────────
-function navigate(page) {
-  currentPage = page;
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
-  const main = document.getElementById('mainContent');
-  main.innerHTML = '<div style="display:flex;justify-content:center;padding:40px"><div class="spinner"></div></div>';
-  const pages = {overview:renderOverview,deploy:renderDeploy,agents:renderAgents,feed:renderFeed,marketplace:renderMarketplace,'create-agent':renderCreateAgent,'my-store':renderMyStore,workflows:renderWorkflows,daemons:renderDaemons,a2a:renderA2A,goals:renderGoals,models:renderModels,channels:renderChannels,settings:renderSettings,schedules:renderSchedules};
-  (pages[page] || renderOverview)();
-}
-
-// ─── GOD EYE ─────────────────────────────────────
-async function renderOverview() {
-  const [health, godEye, mpStats] = await Promise.all([
-    api('/api/v1/health'), api('/api/v1/god-eye'), api('/api/v1/marketplace/stats')
-  ]);
-  const ge = godEye || {};
-  const mp = mpStats || {};
-  const h = health || {};
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">👁️ God Eye — Live Overview</h2>
-      <div class="grid-4" style="margin-bottom:24px">
-        <div class="stat"><div class="stat-value">${ge.active_agents||0}</div><div class="stat-label">Active Agents</div></div>
-        <div class="stat"><div class="stat-value">${ge.active_daemons||0}</div><div class="stat-label">Daemons</div></div>
-        <div class="stat"><div class="stat-value">${ge.total_events||0}</div><div class="stat-label">Total Events</div></div>
-        <div class="stat"><div class="stat-value" style="color:var(--blue)">${mp.published_agents||0}</div><div class="stat-label">Marketplace Agents</div></div>
-      </div>
-      <div class="grid-2" style="margin-bottom:24px">
-        <div class="card">
-          <div class="card-header"><div class="card-title">System Status</div></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            ${Object.entries({Tools:h.tools,Chains:h.chains,Knowledge:h.knowledge,'Mission Control':h.mission_control,Memory:h.swarm_memory,MCP:h.mcp_registry,'Multi-Model':h.multi_model,Marketplace:h.marketplace,Voice:h.voice,Workflows:h.workflows,'A2A Protocol':h.a2a_protocol,'Goals':h.autonomous_goals}).map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 0"><span>${v?'🟢':'🔴'}</span>${k}</div>`).join('')}
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><div class="card-title">Recent Events</div></div>
-          <div id="overviewEvents" style="max-height:250px;overflow-y:auto"></div>
-        </div>
-      </div>
-      <div class="grid-3">
-        <div class="card" style="cursor:pointer" onclick="navigate('deploy')">
-          <div style="font-size:32px;margin-bottom:8px">⚡</div>
-          <div class="card-title">Deploy Agent</div>
-          <div class="card-subtitle">Deploy any of 66+ agents instantly</div>
-        </div>
-        <div class="card" style="cursor:pointer" onclick="navigate('marketplace')">
-          <div style="font-size:32px;margin-bottom:8px">🏪</div>
-          <div class="card-title">Marketplace</div>
-          <div class="card-subtitle">${mp.published_agents||0} agents · ${mp.total_installs||0} installs</div>
-        </div>
-        <div class="card" style="cursor:pointer" onclick="navigate('workflows')">
-          <div style="font-size:32px;margin-bottom:8px">⚙️</div>
-          <div class="card-title">Workflows</div>
-          <div class="card-subtitle">Automate with triggers & actions</div>
-        </div>
-      </div>
-    </div>`;
-  loadOverviewEvents();
-}
-
-async function loadOverviewEvents() {
-  const el = document.getElementById('overviewEvents');
-  if (!el) return;
-  if (liveEvents.length === 0) { el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:8px">No events yet. Deploy an agent to see activity.</div>'; return; }
-  el.innerHTML = liveEvents.slice(-8).reverse().map(e => `<div class="event ${e.event_type}" style="margin-bottom:6px"><div class="event-time">${new Date(e.timestamp).toLocaleTimeString()}</div><div class="event-msg">${e.agent_name||e.agent_type}: ${(e.message||'').slice(0,100)}</div></div>`).join('');
-}
-
-// ─── DEPLOY ──────────────────────────────────────
-async function renderDeploy() {
-  const agents = await api('/api/v1/agents');
-  const models = await api('/api/v1/models/available');
-  const agentList = (agents.agents||[]).map(a => `<option value="${a.type}">${a.name} — ${a.category}</option>`).join('');
-  const modelList = (models.models||[]).map(m => `<option value="${m.model_id}">${m.provider_name}: ${m.name}</option>`).join('');
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">⚡ Deploy Agent</h2>
-      <div class="grid-2">
-        <div class="card">
-          <div class="deploy-form">
-            <div class="form-group">
-              <label class="form-label">Agent Type</label>
-              <select class="form-select" id="deployAgent">${agentList}</select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Model (optional)</label>
-              <select class="form-select" id="deployModel"><option value="">Default (Claude Haiku)</option>${modelList}</select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Task Description</label>
-              <textarea class="form-textarea" id="deployTask" placeholder="What should this agent do?"></textarea>
-            </div>
-            <button class="btn btn-primary btn-lg" onclick="deployAgent()" id="deployBtn">⚡ Deploy</button>
-            <div id="deployResult" style="margin-top:12px"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">Recent Deploys</div>
-          <div id="recentDeploys"></div>
-        </div>
-      </div>
-    </div>`;
-  loadRecentDeploys();
-}
-
-async function deployAgent() {
-  const btn = document.getElementById('deployBtn');
-  btn.innerHTML = '<div class="spinner"></div> Deploying...';
-  btn.disabled = true;
-  const data = { agent_type: document.getElementById('deployAgent').value, task_description: document.getElementById('deployTask').value };
-  const model = document.getElementById('deployModel').value;
-  if (model) data.model = model;
-  const r = await api('/api/v1/deploy', { method: 'POST', body: JSON.stringify(data) });
-  btn.innerHTML = '⚡ Deploy';
-  btn.disabled = false;
-  const el = document.getElementById('deployResult');
-  if (r.agent_id) {
-    el.innerHTML = `<div style="background:var(--greenbg);border:1px solid var(--green);border-radius:8px;padding:12px;font-size:13px">✅ <strong>${r.agent_name}</strong> deployed<br><code style="font-size:11px">${r.agent_id}</code></div>`;
-    loadRecentDeploys();
-  } else {
-    el.innerHTML = `<div style="background:var(--redbg);border:1px solid var(--red);border-radius:8px;padding:12px;font-size:13px">❌ ${r.detail||r.error||'Deploy failed'}</div>`;
-  }
-}
-
-async function loadRecentDeploys() {
-  const el = document.getElementById('recentDeploys');
-  if (!el) return;
-  const r = await api('/api/v1/agents/recent?limit=10');
-  const agents = r.agents || [];
-  if (!agents.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🤖</div><div class="empty-state-text">No agents deployed yet</div></div>'; return; }
-  el.innerHTML = agents.map(a => `<div class="agent-row"><div class="agent-status ${a.status}"></div><div class="agent-name">${a.agent_type}</div><div class="agent-task">${(a.task_description||'').slice(0,60)}</div><div class="agent-time">${a.status}</div></div>`).join('');
-}
-
-// ─── MY AGENTS ───────────────────────────────────
-async function renderAgents() {
-  const r = await api('/api/v1/agents/recent?limit=30');
-  const agents = r.agents || [];
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">🤖 My Agents</h2>
-      <div class="card">${agents.length ? agents.map(a => `
-        <div class="agent-row" style="cursor:pointer" onclick="showAgentResult('${a.id}')">
-          <div class="agent-status ${a.status}"></div>
-          <div class="agent-name">${a.agent_type}</div>
-          <div class="agent-task">${(a.task_description||'').slice(0,80)}</div>
-          <div class="agent-time">${a.status}</div>
-        </div>`).join('') : '<div class="empty-state"><div class="empty-state-icon">🤖</div><div class="empty-state-text">No agents yet. Deploy one!</div><button class="btn btn-primary" onclick="navigate(\'deploy\')">Deploy Agent</button></div>'}</div>
-    </div>`;
-}
-
-async function showAgentResult(id) {
-  const r = await api('/api/v1/status/' + id);
-  if (!r.result) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
-  overlay.innerHTML = `<div class="modal"><div class="modal-title">${r.agent_type} — Result</div><div style="color:var(--text2);font-size:12px;margin-bottom:12px">Status: ${r.status}</div><div style="white-space:pre-wrap;font-size:14px;line-height:1.6;max-height:60vh;overflow-y:auto">${(r.result||'').replace(/</g,'&lt;')}</div><button class="btn btn-secondary" style="margin-top:16px" onclick="this.closest('.modal-overlay').remove()">Close</button></div>`;
-  document.body.appendChild(overlay);
-}
-
-// ─── LIVE FEED ───────────────────────────────────
-function renderFeed() {
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">📡 Live Event Feed</h2>
-      <div class="card" id="feedContainer" style="min-height:400px;max-height:70vh;overflow-y:auto">
-        ${liveEvents.length ? liveEvents.slice().reverse().map(e => `<div class="event ${e.event_type}"><div class="event-time">${new Date(e.timestamp).toLocaleTimeString()}</div><div class="event-msg"><strong>${e.agent_name||e.agent_type||'system'}</strong>: ${(e.message||'').slice(0,200)}</div></div>`).join('') : '<div class="empty-state"><div class="empty-state-icon">📡</div><div class="empty-state-text">Listening for events...</div><div class="spinner"></div></div>'}
-      </div>
-    </div>`;
-}
-
-// ─── MARKETPLACE ─────────────────────────────────
-let mpCategory = null;
-async function renderMarketplace() {
-  const [agents, cats, featured] = await Promise.all([
-    api('/api/v1/marketplace/agents' + (mpCategory ? '?category='+mpCategory : '')),
-    api('/api/v1/marketplace/categories'),
-    api('/api/v1/marketplace/featured')
-  ]);
-  const categories = cats.categories || [];
-  const starters = featured.starters || [];
-  const mpAgents = agents.agents || [];
-  const allAgents = [...mpAgents, ...(mpAgents.length === 0 ? starters.map((s,i) => ({...s, agent_id:'starter-'+i, slug:'starter-'+i, is_free:true, install_count:0, avg_rating:0, rating_count:0, creator:'APEX Team'})) : [])];
-  
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:4px">🏪 Agent Marketplace</h2>
-      <p style="color:var(--text2);margin-bottom:20px">Discover, install, and deploy community agents</p>
-      <div class="mp-category-bar">
-        <button class="mp-cat-btn ${!mpCategory?'active':''}" onclick="mpCategory=null;renderMarketplace()">All</button>
-        ${categories.map(c => `<button class="mp-cat-btn ${mpCategory===c.id?'active':''}" onclick="mpCategory='${c.id}';renderMarketplace()">${c.icon} ${c.name}</button>`).join('')}
-      </div>
-      <div class="mp-grid">
-        ${allAgents.map(a => `
-          <div class="mp-card" onclick="showMpAgent('${a.slug||a.agent_id}')">
-            <div class="mp-icon">${a.icon||'🤖'}</div>
-            <div class="mp-name">${a.name}</div>
-            <div class="mp-desc">${a.description}</div>
-            <div class="mp-meta">
-              <span class="mp-price">${a.is_free||a.price_usd<=0?'FREE':'$'+a.price_usd}</span>
-              ${a.avg_rating>0?`<span class="mp-rating">★ ${a.avg_rating.toFixed(1)}</span>`:''}
-              <span class="mp-installs">📦 ${a.install_count||0}</span>
-              <span>${a.creator||'community'}</span>
-            </div>
-          </div>`).join('')}
-      </div>
-    </div>`;
-}
-
-async function showMpAgent(slug) {
-  const a = await api('/api/v1/marketplace/agents/' + slug);
-  if (!a || a.error) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
-  overlay.innerHTML = `<div class="modal" style="position:relative">
-    <div style="font-size:40px;margin-bottom:12px">${a.icon||'🤖'}</div>
-    <div class="modal-title">${a.name}</div>
-    <div style="color:var(--text2);margin-bottom:16px">${a.description}</div>
-    <div style="display:flex;gap:16px;margin-bottom:16px;font-size:13px">
-      <span class="mp-price" style="font-size:16px">${a.is_free?'FREE':'$'+a.price_usd}</span>
-      <span>📦 ${a.install_count} installs</span>
-      <span>🔄 ${a.total_runs} runs</span>
-      ${a.avg_rating>0?`<span class="mp-rating">★ ${a.avg_rating} (${a.rating_count})</span>`:''}
+// ─── OVERVIEW ──────────────────────────
+async function pOverview() {
+  const [h, ge, mp] = await Promise.all([api('/api/v1/health'), api('/api/v1/god-eye'), api('/api/v1/marketplace/stats')]);
+  const sys = h || {};
+  const g = ge || {};
+  const m = mp || {};
+  $('#main').innerHTML = `<div class="page fade-up">
+    <div class="page-header"><div class="page-title">Command Center</div><div class="page-subtitle">Real-time swarm intelligence overview</div></div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-val" style="color:var(--mint)">${g.active_agents||0}</div><div class="metric-label">Active Agents</div></div>
+      <div class="metric"><div class="metric-val" style="color:var(--cyan)">${g.active_daemons||0}</div><div class="metric-label">Daemons</div></div>
+      <div class="metric"><div class="metric-val" style="color:var(--amber)">${g.total_events||0}</div><div class="metric-label">Events</div></div>
+      <div class="metric"><div class="metric-val" style="color:var(--violet)">${m.published_agents||0}</div><div class="metric-label">Marketplace</div></div>
     </div>
-    ${a.long_description?`<div style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:16px">${a.long_description}</div>`:''}
-    ${a.tags&&a.tags.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">${a.tags.map(t=>`<span class="mp-tag">${t}</span>`).join('')}</div>`:''}
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-lg" onclick="installMpAgent('${a.agent_id}',this)">Install Agent</button>
-      <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Close</button>
+    <div class="g23" style="margin-bottom:14px">
+      <div class="card"><div class="card-head"><div class="card-title">◉ System Status</div><div style="font-size:11px;color:var(--mint)">v${sys.version||'4.0'}</div></div>
+        <div class="card-body"><div class="status-grid">
+          ${Object.entries({Tools:sys.tools,Chains:sys.chains,Knowledge:sys.knowledge,'Mission Ctrl':sys.mission_control,Memory:sys.swarm_memory,MCP:sys.mcp_registry,'Multi-Model':sys.multi_model,Marketplace:sys.marketplace,Voice:sys.voice,Workflows:sys.workflows,A2A:sys.a2a_protocol,Goals:sys.autonomous_goals,Enterprise:sys.enterprise}).map(([k,v])=>`<div class="status-item"><div class="dot ${v?'live':'idle'}"></div><span class="${v?'status-on':'status-off'}">${k}</span></div>`).join('')}
+        </div></div>
+      </div>
+      <div class="card"><div class="card-head"><div class="card-title">◎ Live Events</div></div>
+        <div class="card-body" id="overviewFeed" style="max-height:280px;overflow-y:auto">${events.length?events.slice(-6).reverse().map(e=>`<div class="event-item"><div class="event-dot" style="background:var(--mint)"></div><div class="event-content">${e.agent_name||e.agent_type||'—'}<div class="event-time">${new Date(e.timestamp).toLocaleTimeString()}</div></div></div>`).join(''):'<div style="color:var(--text3);font-size:13px;padding:20px 0;text-align:center">Waiting for events...</div>'}</div>
+      </div>
     </div>
-    <div id="mpInstallResult" style="margin-top:12px"></div>
+    <div class="g3">
+      <div class="card" style="cursor:pointer" onclick="go('deploy')"><div class="card-body" style="text-align:center;padding:28px"><div style="font-size:28px;margin-bottom:8px">⚡</div><div style="font-weight:600">Deploy Agent</div><div style="color:var(--text3);font-size:12px;margin-top:4px">66+ specialized agents</div></div></div>
+      <div class="card" style="cursor:pointer" onclick="go('goals')"><div class="card-body" style="text-align:center;padding:28px"><div style="font-size:28px;margin-bottom:8px">◆</div><div style="font-weight:600">Launch Goal</div><div style="color:var(--text3);font-size:12px;margin-top:4px">Autonomous execution</div></div></div>
+      <div class="card" style="cursor:pointer" onclick="go('marketplace')"><div class="card-body" style="text-align:center;padding:28px"><div style="font-size:28px;margin-bottom:8px">◫</div><div style="font-weight:600">Marketplace</div><div style="color:var(--text3);font-size:12px;margin-top:4px">Browse & install agents</div></div></div>
+    </div>
   </div>`;
-  document.body.appendChild(overlay);
 }
 
-async function installMpAgent(id, btn) {
-  btn.innerHTML = '<div class="spinner"></div>';
-  const r = await api('/api/v1/marketplace/agents/'+id+'/install', {method:'POST'});
-  const el = document.getElementById('mpInstallResult');
-  if (r.install_id) { el.innerHTML = `<div style="color:var(--green)">✅ Installed! Deploy from My Agents.</div>`; }
-  else { el.innerHTML = `<div style="color:var(--red)">❌ ${r.detail||r.error||'Failed'}</div>`; }
-  btn.innerHTML = 'Install Agent';
+// ─── DEPLOY ──────────────────────────
+async function pDeploy() {
+  const [ag, mo] = await Promise.all([api('/api/v1/agents'), api('/api/v1/models/available')]);
+  const agents = (ag.agents||[]).map(a=>`<option value="${a.type}">${a.name}</option>`).join('');
+  const models = (mo.models||[]).map(m=>`<option value="${m.model_id}">${m.provider_name||m.provider}: ${m.name}</option>`).join('');
+  $('#main').innerHTML = `<div class="page fade-up">
+    <div class="page-header"><div class="page-title">Deploy Agent</div><div class="page-subtitle">Select an agent, give it a task, choose a model</div></div>
+    <div class="g2">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+        <div><div class="form-label">Agent</div><select class="select" id="dAgent">${agents}</select></div>
+        <div><div class="form-label">Model</div><select class="select" id="dModel"><option value="">Default (Claude Haiku)</option>${models}</select></div>
+        <div><div class="form-label">Task</div><textarea class="textarea" id="dTask" placeholder="Describe the task..."></textarea></div>
+        <button class="btn btn-mint" onclick="doDeploy()" id="dBtn">⚡ Deploy Agent</button>
+        <div id="dResult"></div>
+      </div></div>
+      <div class="card"><div class="card-head"><div class="card-title">Recent</div></div><div class="card-body" id="dRecent"></div></div>
+    </div></div>`;
+  loadRecent();
+}
+async function doDeploy() {
+  const b=$('#dBtn'); b.innerHTML='<div class="spin"></div>'; b.disabled=true;
+  const d={agent_type:$('#dAgent').value,task_description:$('#dTask').value}; const m=$('#dModel').value; if(m)d.model=m;
+  const r=await api('/api/v1/deploy',{method:'POST',body:JSON.stringify(d)});
+  b.innerHTML='⚡ Deploy Agent'; b.disabled=false;
+  $('#dResult').innerHTML=r.agent_id?`<div style="background:var(--mintbg);border:1px solid rgba(0,240,160,0.2);border-radius:10px;padding:14px;font-size:13px">✓ <strong>${r.agent_name||r.agent_type}</strong> deployed · <code style="font-size:11px;color:var(--text2)">${r.agent_id.slice(0,12)}</code></div>`:`<div style="color:var(--rose)">${r.detail||r.error||'Failed'}</div>`;
+  loadRecent();
+}
+async function loadRecent() {
+  const r=await api('/api/v1/agents/recent?limit=8');
+  const el=$('#dRecent'); if(!el)return;
+  el.innerHTML=(r.agents||[]).map(a=>`<div class="agent-row"><div class="dot ${a.status==='running'?'live':a.status==='completed'?'done':'err'}"></div><div class="agent-info"><div class="agent-name">${a.agent_type}</div><div class="agent-task">${(a.task_description||'').slice(0,60)}</div></div><span class="agent-badge ${a.status==='completed'?'badge-done':a.status==='running'?'badge-live':'badge-err'}">${a.status}</span></div>`).join('')||'<div style="color:var(--text3);text-align:center;padding:20px">No agents yet</div>';
 }
 
-// ─── CREATE AGENT ────────────────────────────────
-function renderCreateAgent() {
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">🛠️ Create Custom Agent</h2>
-      <div class="grid-2">
-        <div class="card">
-          <div class="deploy-form">
-            <div class="form-group"><label class="form-label">Agent Name</label><input class="form-input" id="caName" placeholder="e.g. Alpha Scanner"></div>
-            <div class="form-group"><label class="form-label">Icon</label><input class="form-input" id="caIcon" value="🤖" style="width:60px;text-align:center;font-size:24px"></div>
-            <div class="form-group"><label class="form-label">Short Description</label><input class="form-input" id="caDesc" placeholder="One line about what it does"></div>
-            <div class="form-group"><label class="form-label">Category</label>
-              <select class="form-select" id="caCat"><option>Crypto & DeFi</option><option>Coding & Dev</option><option>Writing & Content</option><option>Data & Research</option><option>Business & Strategy</option><option>Productivity</option></select>
-            </div>
-            <div class="form-group"><label class="form-label">System Prompt</label><textarea class="form-textarea" id="caPrompt" style="min-height:180px" placeholder="You are an expert at..."></textarea></div>
-            <div class="form-group"><label class="form-label">Price (USD) — 0 = free</label><input class="form-input" id="caPrice" type="number" value="0" min="0" step="0.99"></div>
-            <div class="form-group"><label class="form-label">Creator Name</label><input class="form-input" id="caCreator" placeholder="Your name or handle"></div>
-            <button class="btn btn-primary btn-lg" onclick="createMpAgent()">Create Agent</button>
-            <div id="caResult" style="margin-top:12px"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">Tips</div>
-          <div style="color:var(--text2);font-size:14px;line-height:1.8">
-            <p>📝 <strong>System prompt</strong> is the soul of your agent. Be specific about expertise, output format, and behavior.</p><br>
-            <p>💰 <strong>Pricing</strong>: Free agents get more installs. Paid agents earn you 80% of each sale.</p><br>
-            <p>🏷️ <strong>After creating</strong>, publish it to make it visible in the marketplace.</p>
-          </div>
-        </div>
-      </div>
-    </div>`;
+// ─── AGENTS ──────────────────────────
+async function pAgents() {
+  const r=await api('/api/v1/agents/recent?limit=30');
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Agent History</div></div>
+    <div class="card"><div class="card-body">${(r.agents||[]).map(a=>`<div class="agent-row" style="cursor:pointer" onclick="viewAgent('${a.id}')"><div class="dot ${a.status==='running'?'live':a.status==='completed'?'done':'err'}"></div><div class="agent-info"><div class="agent-name">${a.agent_type}</div><div class="agent-task">${(a.task_description||'').slice(0,100)}</div></div><span class="agent-badge ${a.status==='completed'?'badge-done':a.status==='running'?'badge-live':'badge-err'}">${a.status}</span></div>`).join('')||'<div style="text-align:center;padding:40px;color:var(--text3)">No agents deployed yet</div>'}</div></div></div>`;
+}
+async function viewAgent(id) {
+  const r=await api('/api/v1/status/'+id); if(!r||!r.result)return;
+  const o=document.createElement('div');o.className='modal-bg';o.onclick=e=>{if(e.target===o)o.remove()};
+  o.innerHTML=`<div class="modal-box"><div style="font-weight:700;font-size:18px;margin-bottom:12px">${r.agent_type}</div><div style="color:var(--text2);font-size:12px;margin-bottom:16px">${r.status}</div><div style="white-space:pre-wrap;font-size:13.5px;line-height:1.7;max-height:50vh;overflow-y:auto">${(r.result||'').replace(/</g,'&lt;')}</div><button class="btn" style="margin-top:16px" onclick="this.closest('.modal-bg').remove()">Close</button></div>`;
+  document.body.appendChild(o);
 }
 
-async function createMpAgent() {
-  const data = {
-    name: document.getElementById('caName').value,
-    description: document.getElementById('caDesc').value,
-    system_prompt: document.getElementById('caPrompt').value,
-    category: document.getElementById('caCat').value,
-    icon: document.getElementById('caIcon').value,
-    price_usd: parseFloat(document.getElementById('caPrice').value) || 0,
-    creator_name: document.getElementById('caCreator').value || 'anonymous',
-  };
-  const r = await api('/api/v1/marketplace/agents', {method:'POST', body:JSON.stringify(data)});
-  const el = document.getElementById('caResult');
-  if (r.agent_id) {
-    el.innerHTML = `<div style="background:var(--greenbg);border:1px solid var(--green);border-radius:8px;padding:12px">✅ Created! <strong>${r.slug}</strong><br><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="publishAgent('${r.agent_id}',this)">Publish to Marketplace</button></div>`;
-  } else {
-    el.innerHTML = `<div style="color:var(--red)">❌ ${r.detail||r.error||'Failed'}</div>`;
-  }
+// ─── LIVE FEED ──────────────────────────
+function pFeed() {
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Live Feed</div><div class="page-subtitle">Real-time event stream from all agents</div></div>
+    <div class="card"><div class="card-body" id="feedBox" style="min-height:400px;max-height:65vh;overflow-y:auto">${events.length?events.slice().reverse().map(e=>`<div class="event-item"><div class="event-dot" style="background:${e.event_type?.includes('fail')?'var(--rose)':e.event_type?.includes('alert')?'var(--amber)':'var(--mint)'}"></div><div class="event-content"><strong>${e.agent_name||e.agent_type||'system'}</strong> · ${(e.message||'').slice(0,150)}<div class="event-time">${new Date(e.timestamp).toLocaleTimeString()}</div></div></div>`).join(''):'<div style="text-align:center;padding:40px;color:var(--text3)"><div class="spin" style="margin-bottom:12px"></div><br>Listening for events...</div>'}</div></div></div>`;
 }
 
-async function publishAgent(id, btn) {
-  btn.innerHTML = '<div class="spinner"></div>';
-  await api('/api/v1/marketplace/agents/'+id+'/publish', {method:'POST'});
-  btn.innerHTML = '✅ Published!';
-  btn.disabled = true;
+// ─── GOALS ──────────────────────────
+async function pGoals() {
+  const [goals,roles]=await Promise.all([api('/api/v1/goals'),api('/api/v1/roles')]);
+  const rl=roles.roles||[];
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Autonomous Goals</div><div class="page-subtitle">Define a business objective — the swarm builds a team and executes</div></div>
+    <div class="g23">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+        <div><div class="form-label">Goal</div><input class="input" id="gTitle" placeholder="e.g. Launch a weekly DeFi newsletter"></div>
+        <div><div class="form-label">Description</div><textarea class="textarea" id="gDesc" placeholder="Detailed objective..."></textarea></div>
+        <div><div class="form-label">Team</div><div style="display:flex;flex-wrap:wrap;gap:6px" id="gRoles">${rl.map(r=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:5px 10px;background:var(--surface2);border-radius:7px;cursor:pointer"><input type="checkbox" value="${r.role_id}" ${['ceo','researcher','writer','analyst'].includes(r.role_id)?'checked':''}>${r.icon} ${r.name}</label>`).join('')}</div></div>
+        <button class="btn btn-mint" onclick="launchGoal()" id="gBtn">◆ Launch Goal</button>
+        <div id="gResult"></div>
+      </div></div>
+      <div class="card"><div class="card-head"><div class="card-title">How It Works</div></div><div class="card-body" style="color:var(--text2);font-size:13px;line-height:2">
+        <div>1 → <strong style="color:var(--text)">You define</strong> the goal</div>
+        <div>2 → <strong style="color:var(--text)">AI decomposes</strong> into projects & tasks</div>
+        <div>3 → <strong style="color:var(--text)">Roles assigned</strong> (CEO, Analyst, Writer...)</div>
+        <div>4 → <strong style="color:var(--text)">Agents execute</strong> in parallel</div>
+        <div>5 → <strong style="color:var(--text)">Results synthesized</strong> into one report</div>
+      </div></div>
+    </div>
+    ${(goals.goals||[]).length?`<div style="margin-top:20px">${(goals.goals||[]).reverse().map(g=>`<div class="goal-card"><div style="display:flex;justify-content:space-between;align-items:center"><div><strong>${g.title}</strong><div style="color:var(--text2);font-size:12px;margin-top:4px">${g.projects_count} projects · ${g.tasks_total} tasks</div></div><div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:var(--mint)">${g.progress}%</div></div><div class="goal-progress"><div class="goal-fill" style="width:${g.progress}%"></div></div></div>`).join('')}</div>`:''}</div>`;
 }
-
-// ─── MY STORE ────────────────────────────────────
-async function renderMyStore() {
-  const [agents, earnings] = await Promise.all([api('/api/v1/marketplace/my-agents'), api('/api/v1/marketplace/earnings')]);
-  const myAgents = agents.agents || [];
-  const e = earnings || {};
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">💰 My Store</h2>
-      <div class="grid-3" style="margin-bottom:24px">
-        <div class="stat"><div class="stat-value">$${(e.total_earned||0).toFixed(2)}</div><div class="stat-label">Total Earned</div></div>
-        <div class="stat"><div class="stat-value">${e.total_sales||0}</div><div class="stat-label">Total Sales</div></div>
-        <div class="stat"><div class="stat-value">${myAgents.length}</div><div class="stat-label">My Agents</div></div>
-      </div>
-      <div class="card">${myAgents.length ? myAgents.map(a => `
-        <div class="agent-row">
-          <span style="font-size:20px">${a.icon||'🤖'}</span>
-          <div class="agent-name">${a.name}</div>
-          <span style="font-size:12px;color:var(--text2)">📦${a.install_count} ★${a.avg_rating||0}</span>
-          <span style="font-size:12px;color:${a.published?'var(--green)':'var(--text2)'}">${a.published?'Published':'Draft'}</span>
-          ${!a.published?`<button class="btn btn-primary btn-sm" onclick="publishAgent('${a.agent_id}',this)">Publish</button>`:''}
-        </div>`).join('') : '<div class="empty-state"><div class="empty-state-icon">🛠️</div><div class="empty-state-text">No agents yet</div><button class="btn btn-primary" onclick="navigate(\'create-agent\')">Create Agent</button></div>'}</div>
-    </div>`;
-}
-
-// ─── WORKFLOWS ───────────────────────────────────
-async function renderWorkflows() {
-  const [wfs, templates] = await Promise.all([api('/api/v1/workflows'), api('/api/v1/workflows/templates')]);
-  const workflows = wfs.workflows || [];
-  const tmpls = templates.templates || {};
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">⚙️ Workflows</h2>
-      <div style="margin-bottom:20px"><h3 style="font-size:16px;margin-bottom:12px;color:var(--text2)">Quick Start Templates</h3>
-        <div class="grid-3">${Object.entries(tmpls).map(([id,t])=>`
-          <div class="card" style="cursor:pointer" onclick="createWorkflow('${id}')">
-            <div class="card-title" style="font-size:14px">${t.name}</div>
-            <div class="card-subtitle">${t.description}</div>
-            <div style="margin-top:8px;font-size:11px;color:var(--green)">Trigger: ${t.trigger_type}</div>
-          </div>`).join('')}</div>
-      </div>
-      <h3 style="font-size:16px;margin-bottom:12px">Active Workflows</h3>
-      <div class="card">${workflows.length ? workflows.map(w => `
-        <div class="agent-row">
-          <div class="agent-status ${w.enabled?'running':'failed'}"></div>
-          <div class="agent-name">${w.name}</div>
-          <div style="font-size:12px;color:var(--text2)">${w.trigger_type} → ${w.fire_count} fires</div>
-          <button class="btn btn-sm btn-secondary" onclick="toggleWorkflow('${w.workflow_id}')">Toggle</button>
-        </div>`).join('') : '<div style="color:var(--text2);padding:16px;text-align:center">No workflows. Use a template above to get started.</div>'}</div>
-    </div>`;
-}
-
-async function createWorkflow(templateId) {
-  const r = await api('/api/v1/workflows', {method:'POST', body:JSON.stringify({name:'',trigger_type:'',actions:[],template_id:templateId})});
-  if (r.workflow_id) renderWorkflows();
-}
-
-async function toggleWorkflow(id) {
-  await api('/api/v1/workflows/'+id+'/toggle', {method:'POST'});
-  renderWorkflows();
-}
-
-// ─── DAEMONS ─────────────────────────────────────
-async function renderDaemons() {
-  const r = await api('/api/v1/daemons');
-  const daemons = r.daemons || [];
-  const presets = r.presets || {};
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">👁️ Daemons — 24/7 Monitors</h2>
-      <div class="grid-3" style="margin-bottom:20px">${Object.entries(presets).map(([id,p])=>`
-        <div class="card" style="cursor:pointer" onclick="startDaemon('${id}')">
-          <div class="card-title" style="font-size:14px">${p.name}</div>
-          <div class="card-subtitle">${(p.task_description||'').slice(0,80)}</div>
-          <div style="margin-top:8px;font-size:11px;color:var(--text2)">Every ${p.interval_seconds}s</div>
-        </div>`).join('')}</div>
-      <h3 style="font-size:16px;margin-bottom:12px">Running Daemons</h3>
-      <div class="card">${daemons.length ? daemons.map(d => `
-        <div class="agent-row">
-          <div class="agent-status ${d.status==='running'?'running':'failed'}"></div>
-          <div class="agent-name">${d.agent_name}</div>
-          <div style="font-size:12px;color:var(--text2)">${d.cycles} cycles</div>
-          <button class="btn btn-danger btn-sm" onclick="stopDaemon('${d.daemon_id}')">Stop</button>
-        </div>`).join('') : '<div style="color:var(--text2);padding:16px;text-align:center">No daemons running. Click a preset above to start.</div>'}</div>
-    </div>`;
-}
-
-async function startDaemon(id) { await api('/api/v1/daemons/start', {method:'POST', body:JSON.stringify({preset_id:id})}); renderDaemons(); }
-async function stopDaemon(id) { await api('/api/v1/daemons/'+id+'/stop', {method:'POST'}); renderDaemons(); }
-
-// ─── GOALS ───────────────────────────────────────
-async function renderGoals() {
-  const [goals, roles, stats] = await Promise.all([api('/api/v1/goals'), api('/api/v1/roles'), api('/api/v1/goals/stats/overview')]);
-  const goalList = (goals.goals || []).slice().reverse();
-  const roleList = roles.roles || [];
-  const s = stats || {};
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:4px">🎯 Autonomous Goals</h2>
-      <p style="color:var(--text2);margin-bottom:20px">Give a high-level goal — the swarm builds the org, assigns roles, and executes</p>
-      <div class="grid-3" style="margin-bottom:24px">
-        <div class="stat"><div class="stat-value">${s.total_goals||0}</div><div class="stat-label">Goals</div></div>
-        <div class="stat"><div class="stat-value">${s.total_tasks||0}</div><div class="stat-label">Total Tasks</div></div>
-        <div class="stat"><div class="stat-value">${s.available_roles||0}</div><div class="stat-label">Available Roles</div></div>
-      </div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">Launch New Goal</div>
-          <div class="deploy-form">
-            <div class="form-group"><label class="form-label">Goal</label><input class="form-input" id="goalTitle" placeholder="e.g. Launch a DeFi analytics newsletter"></div>
-            <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" id="goalDesc" placeholder="Detailed description of what you want to achieve..."></textarea></div>
-            <div class="form-group"><label class="form-label">Team Roles</label>
-              <div style="display:flex;flex-wrap:wrap;gap:6px" id="goalRoles">${roleList.map(r=>`<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;background:var(--surface2);border-radius:6px;cursor:pointer"><input type="checkbox" value="${r.role_id}" ${['ceo','researcher','writer','analyst'].includes(r.role_id)?'checked':''}> ${r.icon} ${r.name}</label>`).join('')}</div>
-            </div>
-            <button class="btn btn-primary btn-lg" onclick="launchGoal()" id="goalBtn">🎯 Launch Goal</button>
-            <div id="goalResult" style="margin-top:12px"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">Org Chart — Role Permissions</div>
-          <div style="max-height:350px;overflow-y:auto">${roleList.map(r=>`
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
-              <span style="font-size:20px">${r.icon}</span>
-              <div style="flex:1"><strong>${r.name}</strong><br><span style="color:var(--text2);font-size:11px">${r.description}</span></div>
-              <span style="font-size:11px;color:var(--text2)">${r.tool_count} tools</span>
-              ${r.can_delegate?'<span style="font-size:10px;color:var(--green)">DELEGATE</span>':''}
-            </div>`).join('')}</div>
-        </div>
-      </div>
-      ${goalList.length ? `<h3 style="font-size:16px;margin:20px 0 12px">Goals</h3>` + goalList.map(g => `
-        <div class="card" style="margin-bottom:12px;cursor:pointer" onclick="showGoal('${g.goal_id}')">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div><strong>🎯 ${g.title}</strong><br><span style="color:var(--text2);font-size:12px">${g.projects_count} projects · ${g.tasks_total} tasks · ${g.org_roles.length} roles</span></div>
-            <div style="text-align:right"><div style="font-size:20px;font-weight:700;color:var(--green)">${g.progress}%</div><div style="font-size:11px;color:${g.status==='completed'?'var(--green)':'var(--orange)'}">${g.status}</div></div>
-          </div>
-          <div style="margin-top:8px;height:4px;background:var(--surface2);border-radius:2px"><div style="height:100%;width:${g.progress}%;background:var(--green);border-radius:2px"></div></div>
-        </div>`).join('') : ''}
-    </div>`;
-}
-
 async function launchGoal() {
-  const btn = document.getElementById('goalBtn');
-  btn.innerHTML = '<div class="spinner"></div> Running...';
-  btn.disabled = true;
-  const roles = [...document.querySelectorAll('#goalRoles input:checked')].map(i=>i.value);
-  const r = await api('/api/v1/goals', {method:'POST', body:JSON.stringify({title:document.getElementById('goalTitle').value, description:document.getElementById('goalDesc').value, org_roles:roles})});
-  btn.innerHTML = '🎯 Launch Goal';
-  btn.disabled = false;
-  const el = document.getElementById('goalResult');
-  if (r.goal_id) {
-    el.innerHTML = `<div style="background:var(--greenbg);border:1px solid var(--green);border-radius:8px;padding:12px">✅ Goal completed! ${r.projects_count} projects, ${r.tasks_completed}/${r.tasks_total} tasks done. <strong>${r.progress}%</strong><br><button class="btn btn-sm btn-secondary" style="margin-top:8px" onclick="showGoal('${r.goal_id}')">View Details</button></div>`;
-  } else {
-    el.innerHTML = `<div style="color:var(--red)">❌ ${r.detail||r.error||'Failed'}</div>`;
-  }
+  const b=$('#gBtn');b.innerHTML='<div class="spin"></div>';b.disabled=true;
+  const roles=[...$('#gRoles').querySelectorAll('input:checked')].map(i=>i.value);
+  const r=await api('/api/v1/goals',{method:'POST',body:JSON.stringify({title:$('#gTitle').value,description:$('#gDesc').value,org_roles:roles})});
+  b.innerHTML='◆ Launch Goal';b.disabled=false;
+  $('#gResult').innerHTML=r.goal_id?`<div style="background:var(--mintbg);border:1px solid rgba(0,240,160,0.2);border-radius:10px;padding:14px">✓ Goal complete — ${r.tasks_completed}/${r.tasks_total} tasks · <strong>${r.progress}%</strong></div>`:`<div style="color:var(--rose)">${r.detail||r.error||'Failed'}</div>`;
 }
 
-async function showGoal(goalId) {
-  const g = await api('/api/v1/goals/'+goalId);
-  if (!g || g.error) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
-  const projHtml = (g.projects||[]).map(p => `<div style="margin-bottom:16px"><h4>${p.title} <span style="color:var(--text2);font-size:12px">${p.progress}%</span></h4>${(p.tasks||[]).map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)"><span>${t.role_icon}</span><div class="agent-status ${t.status}"></div><strong style="font-size:12px">${t.role_name}</strong><span style="flex:1;font-size:12px;color:var(--text2)">${t.title}</span><span style="font-size:11px;color:${t.status==='completed'?'var(--green)':'var(--red)'}">${t.status}</span></div>`).join('')}</div>`).join('');
-  overlay.innerHTML = `<div class="modal"><div class="modal-title">🎯 ${g.title}</div><div style="color:var(--text2);font-size:12px;margin-bottom:16px">${g.status} · ${g.progress}% · ${g.tasks_completed}/${g.tasks_total} tasks</div><div style="margin-bottom:12px;display:flex;gap:6px">${(g.org_roles||[]).map(r=>{const role=g.org_chart?.find(c=>c.role===r)||{};return`<span style="font-size:10px;padding:3px 8px;background:var(--surface2);border-radius:4px">${role.icon||'🤖'} ${role.name||r}</span>`}).join('')}</div>${projHtml}<button class="btn btn-secondary" style="margin-top:12px" onclick="this.closest('.modal-overlay').remove()">Close</button></div>`;
-  document.body.appendChild(overlay);
+// ─── A2A ──────────────────────────
+async function pA2A() {
+  const s=await api('/api/v1/a2a/stats');
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Swarm Delegate</div><div class="page-subtitle">Give a complex task — agents decompose, delegate, and synthesize</div></div>
+    <div class="g23">
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+        <div><div class="form-label">Complex Task</div><textarea class="textarea" id="a2aTask" placeholder="e.g. Research top 5 AI startups, analyze business models, write investment report"></textarea></div>
+        <button class="btn btn-mint" onclick="doA2A()" id="a2aBtn">◇ Delegate to Swarm</button>
+        <div id="a2aResult"></div>
+      </div></div>
+      <div class="card"><div class="card-body"><div class="metric-val" style="color:var(--cyan)">${(s||{}).total_plans||0}</div><div class="metric-label">Total Plans</div><div style="margin-top:16px"><div class="metric-val" style="color:var(--amber)">${(s||{}).total_subtasks||0}</div><div class="metric-label">Total Subtasks</div></div></div></div>
+    </div></div>`;
+}
+async function doA2A() {
+  const b=$('#a2aBtn');b.innerHTML='<div class="spin"></div>';b.disabled=true;
+  const r=await api('/api/v1/a2a/delegate',{method:'POST',body:JSON.stringify({task:$('#a2aTask').value})});
+  b.innerHTML='◇ Delegate to Swarm';b.disabled=false;
+  if(r.plan_id){const sub=(r.subtasks||[]).map(s=>`<div class="agent-row"><div class="dot ${s.status==='completed'?'done':'err'}"></div><div class="agent-info"><div class="agent-name">${s.agent_type}</div><div class="agent-task">${(s.description||'').slice(0,80)}</div></div><span class="agent-badge ${s.status==='completed'?'badge-done':'badge-err'}">${s.status}</span></div>`).join('');
+  $('#a2aResult').innerHTML=`<div class="card" style="margin-top:12px"><div class="card-body">${sub}${r.final_result?`<div style="margin-top:14px;padding:14px;background:var(--bg);border-radius:10px;font-size:13px;white-space:pre-wrap;max-height:300px;overflow-y:auto">${r.final_result.replace(/</g,'&lt;')}</div>`:''}</div></div>`;}
+  else{$('#a2aResult').innerHTML=`<div style="color:var(--rose)">${r.detail||r.error||'Failed'}</div>`;}
 }
 
-// ─── A2A PROTOCOL ────────────────────────────────
-async function renderA2A() {
-  const [stats, plans] = await Promise.all([api('/api/v1/a2a/stats'), api('/api/v1/a2a/plans')]);
-  const s = stats || {};
-  const planList = (plans.plans || []).slice().reverse();
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:4px">🔗 Agent-to-Agent Protocol</h2>
-      <p style="color:var(--text2);margin-bottom:20px">Give a complex task — agents decompose, delegate, and synthesize automatically</p>
-      <div class="grid-3" style="margin-bottom:24px">
-        <div class="stat"><div class="stat-value">${s.total_plans||0}</div><div class="stat-label">Total Plans</div></div>
-        <div class="stat"><div class="stat-value">${s.total_subtasks||0}</div><div class="stat-label">Total Subtasks</div></div>
-        <div class="stat"><div class="stat-value">${s.running||0}</div><div class="stat-label">Running</div></div>
-      </div>
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">Launch Multi-Agent Task</div>
-          <div class="deploy-form">
-            <div class="form-group"><label class="form-label">Complex Task</label><textarea class="form-textarea" id="a2aTask" placeholder="e.g. Research the top 5 AI startups in 2026, analyze their business models, and write a competitive landscape report with investment recommendations"></textarea></div>
-            <div class="form-group"><label class="form-label">Lead Agent</label><select class="form-select" id="a2aLead"><option value="research">Research (default)</option><option value="data-analyst">Data Analyst</option><option value="market-analyst">Market Analyst</option></select></div>
-            <button class="btn btn-primary btn-lg" onclick="launchA2A()" id="a2aBtn">🔗 Delegate to Swarm</button>
-            <div id="a2aResult" style="margin-top:12px"></div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:12px">How It Works</div>
-          <div style="color:var(--text2);font-size:13px;line-height:2">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">1️⃣ <strong>Decompose</strong> — AI breaks your task into subtasks</div>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">2️⃣ <strong>Discover</strong> — best agent selected for each subtask</div>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">3️⃣ <strong>Delegate</strong> — sub-agents execute in parallel</div>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">4️⃣ <strong>Aggregate</strong> — lead agent synthesizes everything</div>
-          </div>
-        </div>
-      </div>
-      ${planList.length ? `<h3 style="font-size:16px;margin:20px 0 12px">Recent Plans</h3>` + planList.map(p => `
-        <div class="card" style="margin-bottom:12px;cursor:pointer" onclick="showA2APlan('${p.plan_id}')">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div><strong>${p.original_task}</strong><br><span style="color:var(--text2);font-size:12px">${p.subtasks.length} subtasks · ${p.strategy} · ${p.status}</span></div>
-            <div style="font-size:12px;color:${p.status==='completed'?'var(--green)':p.status==='running'?'var(--orange)':'var(--red)'}">${p.status.toUpperCase()}</div>
-          </div>
-        </div>`).join('') : ''}
-    </div>`;
+// ─── DAEMONS ──────────────────────────
+async function pDaemons() {
+  const r=await api('/api/v1/daemons');
+  const daemons=r.daemons||[];const presets=r.presets||{};
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Daemons</div><div class="page-subtitle">24/7 autonomous monitors</div></div>
+    <div class="g3" style="margin-bottom:20px">${Object.entries(presets).map(([id,p])=>`<div class="card" style="cursor:pointer" onclick="startDaemon('${id}')"><div class="card-body"><div style="font-weight:600;font-size:14px;margin-bottom:4px">${p.name}</div><div style="color:var(--text2);font-size:12px">${(p.task_description||'').slice(0,60)}</div><div style="margin-top:8px;font-size:11px;color:var(--text3)">Every ${p.interval_seconds}s</div></div></div>`).join('')}</div>
+    <div class="card"><div class="card-head"><div class="card-title">Running</div></div><div class="card-body">${daemons.map(d=>`<div class="agent-row"><div class="dot ${d.status==='running'?'live':'err'}"></div><div class="agent-info"><div class="agent-name">${d.agent_name}</div><div class="agent-task">${d.cycles} cycles</div></div><button class="btn btn-sm" style="color:var(--rose)" onclick="stopDaemon('${d.daemon_id}')">Stop</button></div>`).join('')||'<div style="text-align:center;padding:20px;color:var(--text3)">No daemons running</div>'}</div></div></div>`;
+}
+async function startDaemon(id){await api('/api/v1/daemons',{method:'POST',body:JSON.stringify({preset_id:id})});pDaemons();}
+async function stopDaemon(id){await api('/api/v1/daemons/'+id,{method:'DELETE'});pDaemons();}
+
+// ─── WORKFLOWS ──────────────────────────
+async function pWorkflows() {
+  const [w,t]=await Promise.all([api('/api/v1/workflows'),api('/api/v1/workflows/templates')]);
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Workflows</div></div>
+    <div class="g3" style="margin-bottom:20px">${Object.entries(t.templates||{}).map(([id,tp])=>`<div class="card" style="cursor:pointer" onclick="createWF('${id}')"><div class="card-body"><div style="font-weight:600;margin-bottom:4px">${tp.name}</div><div style="color:var(--text2);font-size:12px">${tp.description||''}</div></div></div>`).join('')}</div>
+    <div class="card"><div class="card-head"><div class="card-title">Active</div></div><div class="card-body">${(w.workflows||[]).map(wf=>`<div class="agent-row"><div class="dot ${wf.enabled?'live':'idle'}"></div><div class="agent-info"><div class="agent-name">${wf.name}</div><div class="agent-task">${wf.trigger_type} · ${wf.fire_count} fires</div></div><button class="btn btn-sm" onclick="toggleWF('${wf.workflow_id}')">Toggle</button></div>`).join('')||'<div style="text-align:center;padding:20px;color:var(--text3)">No workflows</div>'}</div></div></div>`;
+}
+async function createWF(id){await api('/api/v1/workflows',{method:'POST',body:JSON.stringify({template_id:id})});pWorkflows();}
+async function toggleWF(id){await api('/api/v1/workflows/'+id+'/toggle',{method:'POST'});pWorkflows();}
+
+// ─── MARKETPLACE ──────────────────────────
+async function pMarketplace() {
+  const [ag,ft,cat]=await Promise.all([api('/api/v1/marketplace/agents'),api('/api/v1/marketplace/featured'),api('/api/v1/marketplace/categories')]);
+  const starters=ft.starters||[];const items=ag.agents||[];
+  const all=[...items,...(items.length===0?starters.map((s,i)=>({...s,agent_id:'s'+i,slug:'s'+i,is_free:true,install_count:0,avg_rating:0,creator:'APEX Team'})):[])];
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Agent Marketplace</div><div class="page-subtitle">Discover, install, and deploy community agents</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px"><button class="btn btn-sm" style="border-color:var(--mint);color:var(--mint)" onclick="pMarketplace()">All</button>${(cat.categories||[]).map(c=>`<button class="btn btn-sm">${c.icon} ${c.name}</button>`).join('')}</div>
+    <div class="g3">${all.map(a=>`<div class="mp-card" onclick="viewMp('${a.slug||a.agent_id}')"><div class="mp-card-icon">${a.icon||'◈'}</div><div class="mp-card-name">${a.name}</div><div class="mp-card-desc">${a.description}</div><div class="mp-card-footer"><span class="mp-price">${a.is_free||!a.price_usd?'FREE':'$'+a.price_usd}</span><span>⬡ ${a.install_count||0}</span></div></div>`).join('')}</div></div>`;
+}
+async function viewMp(slug) {
+  const a=await api('/api/v1/marketplace/agents/'+slug);if(!a||a.error)return;
+  const o=document.createElement('div');o.className='modal-bg';o.onclick=e=>{if(e.target===o)o.remove()};
+  o.innerHTML=`<div class="modal-box"><div style="font-size:40px;margin-bottom:12px">${a.icon||'◈'}</div><div style="font-size:20px;font-weight:700;margin-bottom:8px">${a.name}</div><div style="color:var(--text2);margin-bottom:16px">${a.description}</div><div style="display:flex;gap:16px;font-size:13px;margin-bottom:16px"><span class="mp-price" style="font-size:16px">${a.is_free?'FREE':'$'+a.price_usd}</span><span style="color:var(--text3)">⬡ ${a.install_count} installs</span></div><button class="btn btn-mint" onclick="installMp('${a.agent_id}',this)">Install</button> <button class="btn" onclick="this.closest('.modal-bg').remove()">Close</button><div id="mpRes" style="margin-top:12px"></div></div>`;
+  document.body.appendChild(o);
+}
+async function installMp(id,b){b.innerHTML='<div class="spin"></div>';const r=await api('/api/v1/marketplace/agents/'+id+'/install',{method:'POST'});b.innerHTML='Install';$('#mpRes').innerHTML=r.install_id?'<div style="color:var(--mint)">✓ Installed</div>':`<div style="color:var(--rose)">${r.detail||'Failed'}</div>`;}
+
+// ─── MODELS ──────────────────────────
+async function pModels() {
+  const r=await api('/api/v1/models');
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">AI Models</div><div class="page-subtitle">${r.available_count||1} providers connected · ${r.total_models||3} models available</div></div>
+    ${(r.providers||[]).map(p=>`<div class="card" style="margin-bottom:14px"><div class="card-head"><div class="card-title"><div class="dot ${p.available?'live':'idle'}"></div>${p.name}</div>${!p.available?`<span style="font-size:11px;color:var(--text3)">Add API key to enable</span>`:''}</div>${p.available?`<div class="card-body"><div class="g3">${p.models.map(m=>`<div style="background:var(--bg);padding:12px;border-radius:10px"><div style="font-weight:500;font-size:13px">${m.name}${m.vision?' 👁':''}</div><div style="font-size:11px;color:var(--text3);margin-top:4px">${m.context_window?.toLocaleString()||'?'} ctx · $${m.cost_per_1m_input}/M</div></div>`).join('')}</div></div>`:''}</div>`).join('')}</div>`;
 }
 
-async function launchA2A() {
-  const btn = document.getElementById('a2aBtn');
-  btn.innerHTML = '<div class="spinner"></div> Delegating...';
-  btn.disabled = true;
-  const r = await api('/api/v1/a2a/delegate', {method:'POST', body:JSON.stringify({task:document.getElementById('a2aTask').value, lead_agent:document.getElementById('a2aLead').value})});
-  btn.innerHTML = '🔗 Delegate to Swarm';
-  btn.disabled = false;
-  const el = document.getElementById('a2aResult');
-  if (r.plan_id) {
-    const subtaskHtml = (r.subtasks||[]).map(s => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)"><div class="agent-status ${s.status}"></div><strong>${s.agent_type}</strong><span style="color:var(--text2);font-size:12px;flex:1">${(s.description||'').slice(0,80)}</span><span style="font-size:11px;color:${s.status==='completed'?'var(--green)':'var(--red)'}">${s.status}</span></div>`).join('');
-    el.innerHTML = `<div class="card" style="margin-top:12px"><div class="card-title">Plan: ${r.plan_id}</div><div style="margin:8px 0;font-size:12px;color:var(--text2)">${r.subtasks.length} subtasks · ${r.strategy} · ${r.status}</div>${subtaskHtml}${r.final_result?`<div style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;white-space:pre-wrap;max-height:300px;overflow-y:auto">${r.final_result.replace(/</g,'&lt;')}</div>`:''}</div>`;
-  } else {
-    el.innerHTML = `<div style="color:var(--red)">❌ ${r.detail||r.error||'Failed'}</div>`;
-  }
+// ─── ORG CHART ──────────────────────────
+async function pOrg() {
+  const r=await api('/api/v1/roles');
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">Organization Chart</div><div class="page-subtitle">Role-based agent permissions and capabilities</div></div>
+    <div class="g3">${(r.roles||[]).map(ro=>`<div class="org-node"><div class="org-icon">${ro.icon}</div><div class="org-role">${ro.name}</div><div class="org-tools">${ro.tool_count} tools${ro.can_delegate?' · Can Delegate':''}</div><div style="margin-top:8px;font-size:11px;color:var(--text3)">${ro.description}</div></div>`).join('')}</div></div>`;
 }
 
-async function showA2APlan(planId) {
-  const [plan, msgs] = await Promise.all([api('/api/v1/a2a/plans/'+planId), api('/api/v1/a2a/plans/'+planId+'/messages')]);
-  if (!plan || plan.error) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
-  const subtaskHtml = (plan.subtasks||[]).map(s => `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)"><div class="agent-status ${s.status}"></div><strong>${s.agent_type}</strong><span style="flex:1;color:var(--text2);font-size:12px">${(s.description||'').slice(0,100)}</span><span style="font-size:11px">${s.status}</span></div>`).join('');
-  const msgHtml = (msgs.messages||[]).map(m => `<div style="font-size:12px;padding:4px 0;color:var(--text2)"><strong>${m.from}</strong> → ${m.to}: ${m.type} ${JSON.stringify(m.payload).slice(0,80)}</div>`).join('');
-  overlay.innerHTML = `<div class="modal"><div class="modal-title">Plan: ${plan.plan_id}</div><div style="color:var(--text2);font-size:12px;margin-bottom:16px">${plan.strategy} · ${plan.status}</div><h4 style="margin-bottom:8px">Subtasks</h4>${subtaskHtml}${plan.final_result?`<h4 style="margin:16px 0 8px">Final Result</h4><div style="white-space:pre-wrap;font-size:13px;max-height:300px;overflow-y:auto;background:var(--surface2);padding:12px;border-radius:8px">${plan.final_result.replace(/</g,'&lt;')}</div>`:''}${msgHtml?`<h4 style="margin:16px 0 8px">Protocol Messages</h4>${msgHtml}`:''}<button class="btn btn-secondary" style="margin-top:16px" onclick="this.closest('.modal-overlay').remove()">Close</button></div>`;
-  document.body.appendChild(overlay);
+// ─── SETTINGS ──────────────────────────
+async function pSettings() {
+  const [h,m]=await Promise.all([api('/api/v1/health'),api('/api/v1/channels')]);
+  $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">System</div></div>
+    <div class="g2">
+      <div class="card"><div class="card-head"><div class="card-title">Info</div></div><div class="card-body" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2);line-height:2.2">
+        Version: ${h.version||'?'}<br>Database: ${h.database||'?'}<br>Auth: ${h.auth||'?'}<br>API: ${BASE}
+      </div></div>
+      <div class="card"><div class="card-head"><div class="card-title">Channels</div></div><div class="card-body">${Object.entries(m||{}).map(([n,i])=>`<div class="agent-row"><div class="dot ${i.enabled?'live':'idle'}"></div><div class="agent-name" style="text-transform:capitalize">${n}</div><span class="agent-badge ${i.enabled?'badge-done':'badge-err'}">${i.enabled?'Connected':'Off'}</span></div>`).join('')}</div></div>
+    </div>
+    <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">API Key</div></div><div class="card-body"><input class="input" id="sKey" value="${KEY}" style="font-family:'IBM Plex Mono',monospace;font-size:12px"><button class="btn btn-mint btn-sm" style="margin-top:10px" onclick="KEY=$('#sKey').value;localStorage.setItem('apex_key',KEY)">Save</button></div></div></div>`;
 }
 
-// ─── MODELS ──────────────────────────────────────
-async function renderModels() {
-  const r = await api('/api/v1/models');
-  const providers = r.providers || [];
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">🧠 AI Models — ${r.available_count||1} Providers Active</h2>
-      <div style="display:flex;flex-direction:column;gap:16px">${providers.map(p => `
-        <div class="card">
-          <div class="card-header"><div><div class="card-title">${p.name} ${p.available?'🟢':'🔴'}</div><div class="card-subtitle">${p.available?'Connected':'Add '+p.provider.toUpperCase()+'_API_KEY to enable'}</div></div></div>
-          ${p.available?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">${p.models.map(m=>`<div style="background:var(--surface2);padding:10px;border-radius:8px;font-size:13px"><strong>${m.name}</strong>${m.vision?' 👁️':''}<br><span style="color:var(--text2);font-size:11px">${m.context_window.toLocaleString()} ctx · $${m.cost_per_1m_input}/M in</span></div>`).join('')}</div>`:''}
-        </div>`).join('')}</div>
-    </div>`;
-}
-
-// ─── CHANNELS ────────────────────────────────────
-async function renderChannels() {
-  const r = await api('/api/v1/channels');
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">💬 Messaging Channels</h2>
-      <div class="grid-3">${Object.entries(r||{}).map(([name,info])=>`
-        <div class="card"><div style="font-size:32px;margin-bottom:8px">${name==='telegram'?'📱':name==='discord'?'🎮':'💼'}</div>
-        <div class="card-title">${name.charAt(0).toUpperCase()+name.slice(1)}</div>
-        <div style="margin-top:8px;font-size:13px;color:${info.enabled?'var(--green)':'var(--text2)'}">${info.enabled?'✅ Connected':'❌ Not configured'}</div>
-        ${!info.enabled?`<div style="margin-top:8px;font-size:12px;color:var(--text2)">Add ${name.toUpperCase()}_BOT_TOKEN to enable</div>`:''}</div>`).join('')}</div>
-    </div>`;
-}
-
-// ─── SCHEDULES ───────────────────────────────────
-async function renderSchedules() {
-  const r = await api('/api/v1/schedules');
-  const schedules = r.schedules || [];
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">🕐 Schedules</h2>
-      <div class="card">${schedules.length ? schedules.map(s => `
-        <div class="agent-row">
-          <div class="agent-status ${s.enabled?'running':'failed'}"></div>
-          <div class="agent-name">${s.agent_type}</div>
-          <div style="font-size:12px;color:var(--text2);font-family:'Space Mono',monospace">${s.cron_expression}</div>
-          <div style="font-size:12px;color:var(--text2)">Next: ${s.next_run||'—'}</div>
-        </div>`).join('') : '<div class="empty-state"><div class="empty-state-icon">🕐</div><div class="empty-state-text">No schedules configured</div></div>'}</div>
-    </div>`;
-}
-
-// ─── SETTINGS ────────────────────────────────────
-async function renderSettings() {
-  const h = await api('/api/v1/health');
-  document.getElementById('mainContent').innerHTML = `
-    <div class="fade-in">
-      <h2 style="font-size:24px;font-weight:700;margin-bottom:20px">⚙️ Settings</h2>
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title" style="margin-bottom:12px">System Info</div>
-        <div style="font-family:'Space Mono',monospace;font-size:13px;color:var(--text2);line-height:2">
-          Version: ${h.version||'?'}<br>
-          Database: ${h.database||'?'}<br>
-          Auth: ${h.auth||'?'}<br>
-          API URL: ${BASE_URL}<br>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title" style="margin-bottom:12px">API Key</div>
-        <div class="form-group">
-          <input class="form-input" id="settingsKey" value="${API_KEY}" style="font-family:'Space Mono',monospace;font-size:12px">
-          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="API_KEY=document.getElementById('settingsKey').value;localStorage.setItem('apex_api_key',API_KEY)">Save</button>
-        </div>
-      </div>
-    </div>`;
-}
-
-// ─── SSE LIVE EVENTS ─────────────────────────────
+// ─── SSE ──────────────────────────
 function connectSSE() {
-  if (eventSource) eventSource.close();
-  eventSource = new EventSource(BASE_URL + '/api/v1/events/stream');
-  eventSource.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      if (data.event_type) {
-        liveEvents.push(data);
-        if (liveEvents.length > 100) liveEvents.shift();
-        if (currentPage === 'feed') renderFeed();
-        if (currentPage === 'overview') loadOverviewEvents();
-      }
-    } catch(err) {}
-  };
-  eventSource.onerror = () => {
-    document.getElementById('statusDot').style.background = 'var(--red)';
-    document.getElementById('statusText').textContent = 'Disconnected';
-    setTimeout(connectSSE, 5000);
-  };
-  eventSource.onopen = () => {
-    document.getElementById('statusDot').style.background = 'var(--green)';
-    document.getElementById('statusText').textContent = 'Connected';
-  };
+  if(sse)sse.close();
+  sse=new EventSource(BASE+'/api/v1/events/stream');
+  sse.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.event_type){events.push(d);if(events.length>200)events.shift();if(page==='feed')pFeed();if(page==='overview'){const f=$('#overviewFeed');if(f)f.innerHTML=events.slice(-6).reverse().map(ev=>`<div class="event-item"><div class="event-dot" style="background:var(--mint)"></div><div class="event-content">${ev.agent_name||ev.agent_type||'—'}<div class="event-time">${new Date(ev.timestamp).toLocaleTimeString()}</div></div></div>`).join('');}}}catch(x){}};
+  sse.onerror=()=>{$('.pulse-dot').style.background='var(--rose)';$('.sidebar-status span').textContent='Offline';setTimeout(connectSSE,5000)};
+  sse.onopen=()=>{$('.pulse-dot').style.background='var(--mint)';$('.sidebar-status span').textContent='Live'};
 }
 
-// ─── INIT ────────────────────────────────────────
-document.getElementById('apiKeyInput').value = API_KEY;
+// ─── INIT ──────────────────────────
 connectSSE();
-navigate('overview');
+go('overview');
 </script>
 </body>
 </html>
