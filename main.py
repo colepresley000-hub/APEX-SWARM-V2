@@ -3399,10 +3399,381 @@ async def list_channels():
 # ─── PREMIUM DASHBOARD ───────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
+async def landing_page():
+    return HTMLResponse(LANDING_HTML.replace("__VERSION__", VERSION))
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return HTMLResponse(DASHBOARD_HTML.replace("__VERSION__", VERSION))
 
+
+
+LANDING_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APEX SWARM — Autonomous AI Agents for the Enterprise</title>
+<meta name="description" content="Deploy 66+ autonomous AI agents that research, analyze, write, and execute 24/7. Multi-model, multi-channel, zero setup.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#050508;--bg2:#0a0a12;--surface:#0e0e18;--surface2:#141422;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
+  --text:#f0f0f8;--text2:#8888a8;--text3:#555570;
+  --mint:#00f0a0;--mint2:#00cc80;--mintbg:rgba(0,240,160,0.06);--mintglow:rgba(0,240,160,0.2);
+  --cyan:#00d4ff;--amber:#ffb800;--rose:#ff3366;--violet:#7733ff;
+}
+html{font-size:16px;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Instrument Sans',sans-serif;overflow-x:hidden}
+::selection{background:var(--mint);color:var(--bg)}
+a{color:var(--mint);text-decoration:none}
+
+/* ─── GRAIN ─── */
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;opacity:0.025;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* ─── NAV ─── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:18px 40px;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(20px);background:rgba(5,5,8,0.8);border-bottom:1px solid var(--border)}
+.nav-logo{font-family:'Playfair Display',serif;font-weight:900;font-size:20px;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.nav-links{display:flex;gap:32px;align-items:center}
+.nav-links a{color:var(--text2);font-size:14px;font-weight:500;transition:color 0.2s}
+.nav-links a:hover{color:var(--text)}
+.nav-cta{background:var(--mint);color:var(--bg);padding:9px 22px;border-radius:8px;font-weight:600;font-size:13px;border:none;cursor:pointer;transition:all 0.2s}
+.nav-cta:hover{background:var(--mint2);transform:translateY(-1px);box-shadow:0 4px 20px var(--mintglow)}
+
+/* ─── HERO ─── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:120px 24px 80px;position:relative}
+.hero::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(0,240,160,0.04) 0%,transparent 70%);pointer-events:none}
+.hero-badge{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--mint);margin-bottom:28px;display:flex;align-items:center;gap:10px;justify-content:center}
+.hero-badge::before,.hero-badge::after{content:'';width:40px;height:1px;background:linear-gradient(90deg,transparent,var(--mint))}
+.hero-badge::after{background:linear-gradient(90deg,var(--mint),transparent)}
+h1{font-family:'Playfair Display',serif;font-size:clamp(48px,7vw,88px);font-weight:900;line-height:1.05;letter-spacing:-2px;max-width:900px;margin-bottom:24px}
+h1 em{font-style:italic;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-sub{color:var(--text2);font-size:18px;max-width:560px;line-height:1.7;margin-bottom:40px}
+.hero-ctas{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center}
+.btn-primary{background:var(--mint);color:var(--bg);padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;border:none;cursor:pointer;transition:all 0.25s;letter-spacing:0.3px}
+.btn-primary:hover{background:var(--mint2);transform:translateY(-2px);box-shadow:0 8px 32px var(--mintglow)}
+.btn-ghost{border:1px solid var(--border2);color:var(--text);padding:14px 32px;border-radius:10px;font-weight:500;font-size:15px;background:transparent;cursor:pointer;transition:all 0.2s}
+.btn-ghost:hover{border-color:var(--mint);color:var(--mint)}
+
+/* ─── LIVE TICKER ─── */
+.ticker{margin-top:60px;overflow:hidden;width:100%;max-width:1000px;position:relative;height:38px;mask-image:linear-gradient(90deg,transparent,black 10%,black 90%,transparent)}
+.ticker-track{display:flex;gap:40px;animation:scroll 30s linear infinite;width:max-content}
+@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.ticker-item{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text3);white-space:nowrap;display:flex;align-items:center;gap:8px}
+.ticker-dot{width:5px;height:5px;border-radius:50%;background:var(--mint);animation:blink 2s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+
+/* ─── STATS BAR ─── */
+.stats{display:flex;justify-content:center;gap:48px;padding:60px 24px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.stat{text-align:center}
+.stat-num{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:600;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-top:6px}
+
+/* ─── SECTIONS ─── */
+section{padding:100px 24px}
+.section-inner{max-width:1100px;margin:0 auto}
+.section-label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--mint);margin-bottom:16px}
+.section-title{font-family:'Playfair Display',serif;font-size:clamp(32px,4vw,48px);font-weight:800;letter-spacing:-1px;margin-bottom:16px;max-width:700px}
+.section-desc{color:var(--text2);font-size:16px;max-width:560px;line-height:1.7;margin-bottom:48px}
+
+/* ─── FEATURE GRID ─── */
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.feature{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;transition:all 0.3s;position:relative;overflow:hidden}
+.feature:hover{border-color:var(--border2);transform:translateY(-3px)}
+.feature::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--mint),transparent);opacity:0;transition:opacity 0.3s}
+.feature:hover::before{opacity:1}
+.feature-icon{font-size:28px;margin-bottom:14px}
+.feature-title{font-weight:700;font-size:16px;margin-bottom:6px}
+.feature-desc{color:var(--text2);font-size:13.5px;line-height:1.6}
+
+/* ─── HOW IT WORKS ─── */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:2px}
+.step{background:var(--surface);padding:32px 24px;text-align:center;position:relative}
+.step:first-child{border-radius:16px 0 0 16px}
+.step:last-child{border-radius:0 16px 16px 0}
+.step-num{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mint);letter-spacing:2px;margin-bottom:12px}
+.step-title{font-weight:700;font-size:15px;margin-bottom:6px}
+.step-desc{color:var(--text2);font-size:13px;line-height:1.5}
+
+/* ─── AGENTS SHOWCASE ─── */
+.agents-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.agent-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;transition:all 0.2s;cursor:default}
+.agent-card:hover{border-color:var(--mint)}
+.agent-card-icon{font-size:24px;margin-bottom:8px}
+.agent-card-name{font-weight:600;font-size:13.5px;margin-bottom:4px}
+.agent-card-desc{color:var(--text3);font-size:11.5px;line-height:1.4}
+
+/* ─── PRICING ─── */
+.pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.price-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;position:relative;transition:all 0.3s}
+.price-card:hover{border-color:var(--border2)}
+.price-card.featured{border-color:var(--mint);background:linear-gradient(180deg,rgba(0,240,160,0.03),var(--surface))}
+.price-card.featured::before{content:'POPULAR';position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--mint);color:var(--bg);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:2px;padding:4px 14px;border-radius:6px;font-weight:600}
+.price-tier{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
+.price-amount{font-family:'Playfair Display',serif;font-size:44px;font-weight:800;margin-bottom:4px}
+.price-amount span{font-size:16px;color:var(--text2);font-family:'Instrument Sans',sans-serif;font-weight:400}
+.price-desc{color:var(--text2);font-size:13px;margin-bottom:24px}
+.price-features{list-style:none;margin-bottom:28px}
+.price-features li{padding:6px 0;font-size:13.5px;color:var(--text2);display:flex;align-items:center;gap:8px}
+.price-features li::before{content:'◉';color:var(--mint);font-size:8px}
+.price-btn{display:block;width:100%;text-align:center;padding:12px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;transition:all 0.2s;border:none;font-family:'Instrument Sans',sans-serif}
+.price-btn-mint{background:var(--mint);color:var(--bg)}
+.price-btn-mint:hover{background:var(--mint2);box-shadow:0 4px 20px var(--mintglow)}
+.price-btn-ghost{background:transparent;border:1px solid var(--border2);color:var(--text)}
+.price-btn-ghost:hover{border-color:var(--mint);color:var(--mint)}
+
+/* ─── COMPARISON ─── */
+.compare-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.compare-table th{text-align:left;padding:12px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)}
+.compare-table td{padding:12px 16px;border-bottom:1px solid var(--border)}
+.compare-table tr:hover td{background:rgba(255,255,255,0.015)}
+.check{color:var(--mint)}
+.cross{color:var(--text3)}
+
+/* ─── CTA SECTION ─── */
+.cta-section{text-align:center;padding:120px 24px;position:relative}
+.cta-section::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(0,240,160,0.05) 0%,transparent 70%);pointer-events:none}
+.cta-title{font-family:'Playfair Display',serif;font-size:clamp(36px,5vw,56px);font-weight:800;letter-spacing:-1px;margin-bottom:16px}
+.cta-sub{color:var(--text2);font-size:17px;margin-bottom:36px;max-width:480px;margin-left:auto;margin-right:auto}
+
+/* ─── FOOTER ─── */
+footer{border-top:1px solid var(--border);padding:40px 24px;text-align:center}
+footer p{font-size:13px;color:var(--text3)}
+footer a{color:var(--text2)}
+
+/* ─── ANIMATIONS ─── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+.anim{opacity:0;transform:translateY(30px);transition:all 0.7s cubic-bezier(0.16,1,0.3,1)}
+.anim.visible{opacity:1;transform:translateY(0)}
+
+/* ─── RESPONSIVE ─── */
+@media(max-width:900px){.features{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.agents-grid{grid-template-columns:1fr 1fr}.pricing{grid-template-columns:1fr}.stats{flex-wrap:wrap;gap:24px}.nav-links a:not(.nav-cta){display:none}.step:first-child,.step:last-child{border-radius:0}.step:first-child{border-radius:16px 16px 0 0}.step:last-child{border-radius:0 0 16px 16px}}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">APEX SWARM</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#agents">Agents</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#compare">Compare</a>
+    <a href="/dashboard" class="nav-cta">Open Dashboard →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">Autonomous AI Platform</div>
+  <h1>Your workforce<br>never <em>sleeps</em></h1>
+  <p class="hero-sub">66 autonomous AI agents that research, analyze, write, and execute — 24/7. Deploy a swarm in seconds. No infrastructure. No babysitting.</p>
+  <div class="hero-ctas">
+    <a href="/dashboard"><button class="btn-primary">Start deploying agents →</button></a>
+    <a href="#features"><button class="btn-ghost">See how it works</button></a>
+  </div>
+
+  <!-- LIVE TICKER -->
+  <div class="ticker">
+    <div class="ticker-track">
+      <div class="ticker-item"><div class="ticker-dot"></div>crypto-research analyzing BTC market structure</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>blog-writer creating SEO content for fintech startup</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>data-analyst processing Q1 revenue metrics</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>market-analyst scanning emerging AI companies</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>defi-analyst monitoring yield farming opportunities</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>code-reviewer auditing smart contract security</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>social-media generating viral thread for product launch</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>competitor-intel tracking OpenClaw latest features</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>crypto-research analyzing BTC market structure</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>blog-writer creating SEO content for fintech startup</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>data-analyst processing Q1 revenue metrics</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>market-analyst scanning emerging AI companies</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>defi-analyst monitoring yield farming opportunities</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>code-reviewer auditing smart contract security</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>social-media generating viral thread for product launch</div>
+      <div class="ticker-item"><div class="ticker-dot"></div>competitor-intel tracking OpenClaw latest features</div>
+    </div>
+  </div>
+</div>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat"><div class="stat-num">66+</div><div class="stat-label">Specialized Agents</div></div>
+  <div class="stat"><div class="stat-num">12</div><div class="stat-label">Built-in Tools</div></div>
+  <div class="stat"><div class="stat-num">9</div><div class="stat-label">LLM Providers</div></div>
+  <div class="stat"><div class="stat-num">24/7</div><div class="stat-label">Autonomous</div></div>
+  <div class="stat"><div class="stat-num">95</div><div class="stat-label">API Endpoints</div></div>
+</div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label anim">Capabilities</div>
+    <div class="section-title anim">Not another chatbot.<br>A full operating system.</div>
+    <div class="section-desc anim">Every feature designed for autonomous execution. Agents don't wait for instructions — they complete missions.</div>
+    <div class="features">
+      <div class="feature anim"><div class="feature-icon">◆</div><div class="feature-title">Autonomous Goals</div><div class="feature-desc">Give a business objective. The swarm builds an org chart, decomposes into projects and tasks, assigns role-based agents, and executes end-to-end.</div></div>
+      <div class="feature anim"><div class="feature-icon">◇</div><div class="feature-title">Agent-to-Agent Protocol</div><div class="feature-desc">Agents hire other agents. A lead agent decomposes complex tasks, delegates to specialists, and synthesizes results into one deliverable.</div></div>
+      <div class="feature anim"><div class="feature-icon">◌</div><div class="feature-title">24/7 Daemons</div><div class="feature-desc">Always-on monitors that scan markets, track competitors, watch for opportunities. Alert you on Telegram when conditions are met.</div></div>
+      <div class="feature anim"><div class="feature-icon">◫</div><div class="feature-title">Agent Marketplace</div><div class="feature-desc">Create, publish, and sell custom agents. Creators earn 80% of every sale. Install community agents with one click.</div></div>
+      <div class="feature anim"><div class="feature-icon">◑</div><div class="feature-title">Multi-Model Intelligence</div><div class="feature-desc">Route tasks to Claude, GPT-4o, Gemini, Llama, DeepSeek, Mistral, Grok — or your own local models. 9 providers, 30+ models.</div></div>
+      <div class="feature anim"><div class="feature-icon">⬡</div><div class="feature-title">Workflow Automation</div><div class="feature-desc">Trigger → Condition → Action engine. When a daemon alerts, deploy an agent. When an agent completes, notify Slack. Chain anything.</div></div>
+      <div class="feature anim"><div class="feature-icon">◰</div><div class="feature-title">Role-Based Permissions</div><div class="feature-desc">10 org chart roles — CEO, CTO, CMO, CFO, Researcher, Writer, Analyst, Marketer, Support, Security — each with scoped tool and email access.</div></div>
+      <div class="feature anim"><div class="feature-icon">◎</div><div class="feature-title">Voice Interface</div><div class="feature-desc">Talk to your swarm. Voice messages transcribed via Whisper, agents respond with TTS. 14 voice options across 2 providers.</div></div>
+      <div class="feature anim"><div class="feature-icon">◉</div><div class="feature-title">Enterprise Hardened</div><div class="feature-desc">Retry logic, circuit breakers, input sanitization, audit trail, metrics, conversation persistence, Swagger API docs.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section style="background:var(--bg2)">
+  <div class="section-inner">
+    <div class="section-label anim">How it works</div>
+    <div class="section-title anim">Four steps to autonomous operations</div>
+    <div class="section-desc anim">From zero to a running AI workforce in under 60 seconds.</div>
+    <div class="steps anim">
+      <div class="step"><div class="step-num">01</div><div class="step-title">Define a goal</div><div class="step-desc">"Monitor DeFi yields and alert me when APY exceeds 15%"</div></div>
+      <div class="step"><div class="step-num">02</div><div class="step-title">Swarm decomposes</div><div class="step-desc">AI breaks it into projects, assigns roles, selects the best agents</div></div>
+      <div class="step"><div class="step-num">03</div><div class="step-title">Agents execute</div><div class="step-desc">Specialists research, analyze, and monitor — using live tools and APIs</div></div>
+      <div class="step"><div class="step-num">04</div><div class="step-title">Results delivered</div><div class="step-desc">Reports in your dashboard. Alerts on Telegram. Actions via webhooks.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- AGENTS -->
+<section id="agents">
+  <div class="section-inner">
+    <div class="section-label anim">The Swarm</div>
+    <div class="section-title anim">66 agents. 6 divisions.</div>
+    <div class="section-desc anim">Each agent is a specialist. Together, they're an autonomous workforce.</div>
+    <div class="agents-grid anim">
+      <div class="agent-card"><div class="agent-card-icon">🔬</div><div class="agent-card-name">Deep Research</div><div class="agent-card-desc">Multi-source investigation with citations</div></div>
+      <div class="agent-card"><div class="agent-card-icon">📊</div><div class="agent-card-name">Market Analyst</div><div class="agent-card-desc">Technical analysis and trend detection</div></div>
+      <div class="agent-card"><div class="agent-card-icon">💎</div><div class="agent-card-name">Crypto Research</div><div class="agent-card-desc">On-chain data, DeFi protocols, alpha signals</div></div>
+      <div class="agent-card"><div class="agent-card-icon">✍️</div><div class="agent-card-name">Blog Writer</div><div class="agent-card-desc">Long-form SEO content with research</div></div>
+      <div class="agent-card"><div class="agent-card-icon">📣</div><div class="agent-card-name">Social Media</div><div class="agent-card-desc">Viral threads, hooks, engagement copy</div></div>
+      <div class="agent-card"><div class="agent-card-icon">💻</div><div class="agent-card-name">Code Reviewer</div><div class="agent-card-desc">Security audits, refactoring, best practices</div></div>
+      <div class="agent-card"><div class="agent-card-icon">📈</div><div class="agent-card-name">Data Analyst</div><div class="agent-card-desc">Metrics, dashboards, statistical analysis</div></div>
+      <div class="agent-card"><div class="agent-card-icon">🎯</div><div class="agent-card-name">SEO Specialist</div><div class="agent-card-desc">Keyword research, content optimization</div></div>
+    </div>
+    <div style="text-align:center;margin-top:32px"><a href="/dashboard" style="color:var(--text2);font-size:14px">View all 66 agents in the dashboard →</a></div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing" style="background:var(--bg2)">
+  <div class="section-inner">
+    <div class="section-label anim" style="text-align:center">Pricing</div>
+    <div class="section-title anim" style="text-align:center;margin-left:auto;margin-right:auto">Start free. Scale to enterprise.</div>
+    <div class="section-desc anim" style="text-align:center;margin-left:auto;margin-right:auto">Bring your own LLM API key. Pay only for what your agents use.</div>
+    <div class="pricing anim">
+      <div class="price-card">
+        <div class="price-tier">Starter</div>
+        <div class="price-amount">$0<span>/mo</span></div>
+        <div class="price-desc">Try the swarm. Deploy agents on demand.</div>
+        <ul class="price-features">
+          <li>10 agent deploys / day</li>
+          <li>All 66 agent types</li>
+          <li>Dashboard access</li>
+          <li>Telegram channel</li>
+          <li>Community support</li>
+        </ul>
+        <button class="price-btn price-btn-ghost" onclick="location.href='/dashboard'">Get started</button>
+      </div>
+      <div class="price-card featured">
+        <div class="price-tier">Pro</div>
+        <div class="price-amount">$49<span>/mo</span></div>
+        <div class="price-desc">Unlimited agents. Full autonomy.</div>
+        <ul class="price-features">
+          <li>Unlimited agent deploys</li>
+          <li>24/7 daemons (5 concurrent)</li>
+          <li>A2A delegation protocol</li>
+          <li>Autonomous goals</li>
+          <li>Marketplace access</li>
+          <li>Voice interface</li>
+          <li>Multi-model routing</li>
+          <li>Priority support</li>
+        </ul>
+        <button class="price-btn price-btn-mint" onclick="location.href='https://apexswarm.gumroad.com/l/pro'">Start Pro trial →</button>
+      </div>
+      <div class="price-card">
+        <div class="price-tier">Enterprise</div>
+        <div class="price-amount">Custom</div>
+        <div class="price-desc">For teams running AI operations at scale.</div>
+        <ul class="price-features">
+          <li>Everything in Pro</li>
+          <li>Unlimited daemons</li>
+          <li>Custom agent development</li>
+          <li>Dedicated infrastructure</li>
+          <li>SLA guarantee</li>
+          <li>SSO / SAML</li>
+          <li>Audit & compliance reports</li>
+          <li>Account manager</li>
+        </ul>
+        <button class="price-btn price-btn-ghost" onclick="location.href='mailto:enterprise@apex-swarm.com'">Contact sales</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section id="compare">
+  <div class="section-inner">
+    <div class="section-label anim" style="text-align:center">Why APEX SWARM</div>
+    <div class="section-title anim" style="text-align:center;margin-left:auto;margin-right:auto">Built different.</div>
+    <div style="overflow-x:auto;margin-top:48px" class="anim">
+      <table class="compare-table">
+        <thead><tr><th>Capability</th><th>APEX SWARM</th><th>OpenClaw</th><th>Claude Code</th><th>ChatGPT</th></tr></thead>
+        <tbody>
+          <tr><td>Multi-agent orchestration</td><td class="check">◉ 66 agents + A2A</td><td class="cross">1 agent + skills</td><td class="check">Agent Teams</td><td class="cross">Single chat</td></tr>
+          <tr><td>Autonomous goals</td><td class="check">◉ Goal → Org → Execute</td><td class="cross">—</td><td class="cross">—</td><td class="cross">—</td></tr>
+          <tr><td>24/7 daemons</td><td class="check">◉ Always-on monitors</td><td class="check">Cron + heartbeat</td><td class="check">/loop command</td><td class="cross">—</td></tr>
+          <tr><td>Agent marketplace</td><td class="check">◉ Create + sell agents</td><td class="cross">Free skills only</td><td class="check">Skills marketplace</td><td class="cross">GPT Store</td></tr>
+          <tr><td>Multi-model</td><td class="check">◉ 9 providers, 30+ models</td><td class="check">Multi-provider</td><td class="cross">Claude only</td><td class="cross">GPT only</td></tr>
+          <tr><td>Role-based permissions</td><td class="check">◉ 10 org chart roles</td><td class="cross">—</td><td class="cross">—</td><td class="cross">—</td></tr>
+          <tr><td>Zero setup</td><td class="check">◉ Cloud API</td><td class="cross">Self-hosted</td><td class="cross">Local CLI</td><td class="check">Web app</td></tr>
+          <tr><td>Voice I/O</td><td class="check">◉ STT + TTS</td><td class="check">Voice support</td><td class="check">Voice STT</td><td class="check">Voice mode</td></tr>
+          <tr><td>Enterprise security</td><td class="check">◉ Audit + sanitization</td><td class="check">SecretRef + sandbox</td><td class="check">Sandboxing</td><td class="cross">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section">
+  <div class="section-label">Ready?</div>
+  <div class="cta-title">Deploy your first<br>agent in 30 seconds.</div>
+  <div class="cta-sub">No credit card. No infrastructure. Just results.</div>
+  <a href="/dashboard"><button class="btn-primary" style="font-size:17px;padding:16px 40px">Open Command Center →</button></a>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <p>APEX SWARM · Autonomous AI Agent Platform · <a href="/api/v1/docs">API Docs</a> · <a href="/api/v1/health">Status</a></p>
+</footer>
+
+<!-- SCROLL ANIMATIONS -->
+<script>
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+document.querySelectorAll('.anim').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
+"""
 
 DASHBOARD_HTML = r"""<!DOCTYPE html>
 <html lang="en">
