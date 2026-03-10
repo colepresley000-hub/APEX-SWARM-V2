@@ -40,9 +40,10 @@ logger = logging.getLogger("apex-swarm")
 # ─── CONFIG ───────────────────────────────────────────────
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20241022")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "apex_swarm.db")
 PORT = int(os.getenv("PORT", "8080"))
 VERSION = "4.0.0"
@@ -571,7 +572,10 @@ def init_db():
                     conn.commit()
                     logger.info(f"✅ Migration: added {table}.{col}")
                 except Exception:
-                    pass  # Column already exists
+                    try:
+                        conn.cursor().execute("ROLLBACK")
+                    except Exception:
+                        pass
         else:
             # SQLite fallback — detect old schema
             try:
@@ -1090,6 +1094,7 @@ def get_knowledge_for_agent(user_api_key: str, agent_type: str, task: str = "") 
         logger.warning(f"Knowledge retrieval failed (non-fatal): {e}")
         return ""
 
+
 # ─── CORE EXECUTION ──────────────────────────────────────
 
 async def execute_task(agent_id: str, agent_type: str, task_description: str, user_api_key: str = "system", model: str = None, image_data: str = None, image_media_type: str = "image/jpeg"):
@@ -1300,6 +1305,38 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 data={"result_preview": result[:300] if result else ""},
             ))
 
+        # ── DAEMON ALERT: Check if result contains alert keywords ──
+        if MISSION_CONTROL and user_api_key and user_api_key.startswith("daemon:"):
+            try:
+                # Get alert conditions for this daemon from DB
+                conn = get_db()
+                try:
+                    row = conn.execute(
+                        f"SELECT alert_conditions FROM daemon_configs WHERE id = ?",
+                        (agent_id,)
+                    ).fetchone()
+                    alert_conds = json.loads(row[0]) if row and row[0] else []
+                finally:
+                    conn.close()
+
+                result_lower = (result or "").lower()
+                triggered = [kw for kw in alert_conds if kw.lower() in result_lower]
+                # Also check for explicit ALERT: prefix from agent
+                has_alert_prefix = "alert:" in result_lower
+
+                if triggered or has_alert_prefix:
+                    await event_bus.emit(Event(
+                        event_type=EventType.DAEMON_ALERT,
+                        agent_id=agent_id,
+                        agent_type=agent_type,
+                        agent_name=agent.get("name", agent_type),
+                        message=result[:800] if result else "",
+                        data={"triggered_keywords": triggered},
+                    ))
+                    logger.info(f"🚨 Daemon alert fired for {agent_id[:8]}: {triggered}")
+            except Exception as e:
+                logger.error(f"Daemon alert check failed: {e}")
+
         # Store result in swarm memory
         if SWARM_MEMORY and swarm_memory and result:
             try:
@@ -1367,7 +1404,9 @@ async def _chain_execute_fn(agent_id: str, agent_type: str, prompt: str):
 
 async def _daemon_execute_fn(agent_id: str, agent_type: str, prompt: str, user_api_key: str = "daemon"):
     """Execute function for daemon agents — returns the result text."""
-    return await execute_task(agent_id, agent_type, prompt, user_api_key)
+    # Tag with daemon: prefix so alert logic can identify daemon runs
+    tagged_key = f"daemon:{user_api_key}" if not user_api_key.startswith("daemon:") else user_api_key
+    return await execute_task(agent_id, agent_type, prompt, tagged_key)
 
 
 # ─── SCHEDULER BACKGROUND LOOP ───────────────────────────
@@ -1681,7 +1720,14 @@ async def lifespan(app: FastAPI):
 
     # Wire event bus to Telegram
     if MISSION_CONTROL and TELEGRAM_ENABLED:
-        event_bus.set_telegram(send_fn=send_telegram, verbosity="important")
+        _tg_chat_ids = set()
+        if TELEGRAM_CHAT_ID:
+            try:
+                _tg_chat_ids.add(int(TELEGRAM_CHAT_ID))
+                logger.info(f"📡 Telegram chat_id loaded: {TELEGRAM_CHAT_ID}")
+            except ValueError:
+                logger.warning(f"⚠️ Invalid TELEGRAM_CHAT_ID: {TELEGRAM_CHAT_ID}")
+        event_bus.set_telegram(send_fn=send_telegram, chat_ids=_tg_chat_ids if _tg_chat_ids else None, verbosity="important")
         logger.info("📡 Event bus → Telegram forwarding active")
 
     # Wire unified channels
@@ -1868,6 +1914,9 @@ async def event_stream(request: Request):
         try:
             # Send initial connection event
             yield f"event: connected\ndata: {{\"message\": \"God-eye connected\", \"version\": \"{VERSION}\"}}\n\n"
+            import json as _json
+            for past in event_bus.get_history(limit=20):
+                yield f"data: {_json.dumps(past)}\n\n"
 
             while True:
                 try:
@@ -2028,57 +2077,6 @@ async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
         return {"daemon_id": daemon_id, "name": req.agent_name, "status": "running", "persistent": True}
     else:
         raise HTTPException(status_code=400, detail="Provide preset_id or task_description")
-
-
-
-@app.get("/api/v1/daemons/status")
-async def get_daemon_status(api_key: str = Depends(verify_api_key)):
-    """
-    Returns live status of all daemons.
-    Shows: id, preset_id, status, last_run, next_run, run_count, last_error
-    """
-    try:
-        daemons = daemon_manager.daemons if hasattr(daemon_manager, "daemons") else {}
-        now = datetime.utcnow()
-
-        result = []
-        for daemon_id, d in daemons.items():
-            interval = d.get("interval_seconds", 0)
-            last_run = d.get("last_run")
-            next_run = None
-            if last_run and interval:
-                try:
-                    lr = datetime.fromisoformat(last_run) if isinstance(last_run, str) else last_run
-                    next_run = (lr + timedelta(seconds=interval)).isoformat()
-                except Exception:
-                    pass
-
-            result.append({
-                "daemon_id": daemon_id,
-                "preset_id": d.get("preset_id", "custom"),
-                "agent_type": d.get("agent_type"),
-                "status": d.get("status", "unknown"),
-                "interval_seconds": interval,
-                "run_count": d.get("run_count", 0),
-                "last_run": last_run,
-                "next_run_estimated": next_run,
-                "last_error": d.get("last_error"),
-            })
-
-        # Flag any boot daemons that are missing entirely
-        running_presets = {r["preset_id"] for r in result}
-        missing = [p for p in BOOT_DAEMONS if p not in running_presets]
-
-        return {
-            "total_daemons": len(result),
-            "running": sum(1 for r in result if r["status"] == "running"),
-            "stopped": sum(1 for r in result if r["status"] != "running"),
-            "missing_boot_daemons": missing,
-            "daemons": result,
-            "checked_at": now.isoformat(),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
 
 
 @app.get("/api/v1/daemons")
@@ -3449,944 +3447,62 @@ async def list_channels():
 
 # ─── PREMIUM DASHBOARD ───────────────────────────────────
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return HTMLResponse(LOGIN_HTML)
+
 @app.get("/", response_class=HTMLResponse)
-async def landing_page():
-    return HTMLResponse(LANDING_HTML.replace("__VERSION__", VERSION))
-
-
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return HTMLResponse(DASHBOARD_HTML.replace("__VERSION__", VERSION))
 
 
 
-
-SWARM_VIEW_HTML = r"""<!DOCTYPE html>
+LOGIN_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>APEX SWARM — Live Swarm View</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>APEX SWARM — Login</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#050508;--surface:#0e0e18;--surface2:#141422;
-  --border:rgba(255,255,255,0.06);
-  --text:#f0f0f8;--text2:#8888a8;--text3:#555570;
-  --mint:#00f0a0;--mintglow:rgba(0,240,160,0.25);
-  --cyan:#00d4ff;--cyanglow:rgba(0,212,255,0.2);
-  --amber:#ffb800;--amberglow:rgba(255,184,0,0.2);
-  --rose:#ff3366;--roseglow:rgba(255,51,102,0.2);
-  --violet:#7733ff;--violetglow:rgba(119,51,255,0.2);
-}
-body{background:var(--bg);color:var(--text);font-family:'Instrument Sans',sans-serif;overflow:hidden;height:100vh}
-
-/* ─── LAYOUT ─── */
-.container{display:grid;grid-template-columns:1fr 340px;grid-template-rows:56px 1fr;height:100vh}
-.topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px}
-.canvas-area{position:relative;overflow:hidden}
-.sidebar{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
-
-/* ─── TOPBAR ─── */
-.top-title{font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
-.top-title .pulse{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 12px var(--mintglow);animation:breathe 2s ease infinite}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:0.4}}
-.top-stats{display:flex;gap:24px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2)}
-.top-stats span{color:var(--mint);font-weight:600}
-.top-back{color:var(--text2);font-size:13px;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:6px}
-.top-back:hover{color:var(--mint)}
-
-/* ─── CANVAS ─── */
-.canvas-area canvas{display:block}
-.canvas-overlay{position:absolute;bottom:20px;left:20px;display:flex;gap:12px}
-.legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3)}
-.legend-dot{width:8px;height:8px;border-radius:50%}
-
-/* ─── SIDEBAR TABS ─── */
-.side-tabs{display:flex;border-bottom:1px solid var(--border)}
-.side-tab{flex:1;padding:12px;text-align:center;font-size:12px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
-.side-tab:hover{color:var(--text)}
-.side-tab.active{color:var(--mint);border-bottom-color:var(--mint)}
-.side-content{flex:1;overflow-y:auto;padding:12px}
-
-/* ─── AGENT ITEMS ─── */
-.agent-item{padding:10px 12px;border-radius:10px;margin-bottom:6px;cursor:pointer;transition:all 0.2s;border:1px solid transparent}
-.agent-item:hover{background:rgba(255,255,255,0.02);border-color:var(--border)}
-.agent-item.selected{background:var(--surface2);border-color:var(--border)}
-.agent-item-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-.agent-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.agent-item-name{font-weight:600;font-size:13px;flex:1}
-.agent-item-badge{font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;text-transform:uppercase}
-.agent-item-task{font-size:11.5px;color:var(--text2);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-
-/* ─── EVENT LOG ─── */
-.event-log-item{padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px}
-.event-log-item:last-child{border:none}
-.event-log-time{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);white-space:nowrap;min-width:55px}
-.event-log-msg{color:var(--text2);line-height:1.4}
-.event-log-msg strong{color:var(--text);font-weight:500}
-
-/* ─── DETAIL PANEL ─── */
-.detail-panel{padding:16px;border-top:1px solid var(--border);background:var(--surface2)}
-.detail-title{font-weight:700;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
-.detail-field{font-size:12px;color:var(--text2);margin-bottom:4px}
-.detail-field span{color:var(--text)}
-.detail-result{margin-top:8px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px;max-height:150px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;color:var(--text2)}
+body{background:#0a0a0f;color:#e2e8f0;font-family:system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:#13131a;border:1px solid #1e1e2e;border-radius:16px;padding:40px;width:100%;max-width:420px}
+.logo{font-size:28px;font-weight:700;color:#a78bfa;margin-bottom:8px}
+.subtitle{font-size:13px;color:#64748b;margin-bottom:32px}
+label{font-size:12px;color:#94a3b8;font-weight:500;display:block;margin-bottom:8px;text-transform:uppercase}
+input{width:100%;background:#0a0a0f;border:1px solid #1e1e2e;border-radius:8px;padding:12px 16px;color:#e2e8f0;font-size:13px;outline:none}
+button{width:100%;margin-top:16px;padding:13px;background:#a78bfa;color:#0a0a0f;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+.error{margin-top:12px;padding:10px 14px;background:#2d1b1b;border:1px solid #7f1d1d;border-radius:8px;font-size:12px;color:#fca5a5;display:none}
+.buy-link{display:block;text-align:center;margin-top:20px;font-size:12px;color:#64748b}
+.buy-link a{color:#a78bfa;text-decoration:none}
 </style>
 </head>
 <body>
-
-<div class="container">
-  <!-- TOP BAR -->
-  <div class="topbar">
-    <a href="/dashboard" class="top-back">← Command Center</a>
-    <div class="top-title"><div class="pulse"></div> Live Swarm View</div>
-    <div class="top-stats">
-      <div>Active: <span id="statActive">0</span></div>
-      <div>Events: <span id="statEvents">0</span></div>
-      <div>Daemons: <span id="statDaemons">0</span></div>
-    </div>
-  </div>
-
-  <!-- CANVAS -->
-  <div class="canvas-area">
-    <canvas id="swarmCanvas"></canvas>
-    <div class="canvas-overlay">
-      <div class="legend-item"><div class="legend-dot" style="background:var(--mint)"></div> Running</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--cyan)"></div> Completed</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--rose)"></div> Failed</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div> Daemon</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--violet)"></div> Delegating</div>
-    </div>
-  </div>
-
-  <!-- SIDEBAR -->
-  <div class="sidebar">
-    <div class="side-tabs">
-      <div class="side-tab active" onclick="switchTab('agents')">Agents</div>
-      <div class="side-tab" onclick="switchTab('events')">Events</div>
-      <div class="side-tab" onclick="switchTab('daemons')">Daemons</div>
-    </div>
-    <div class="side-content" id="sideContent"></div>
-    <div class="detail-panel" id="detailPanel" style="display:none"></div>
-  </div>
+<div class="card">
+<div class="logo">⚡ APEX SWARM</div>
+<div class="subtitle">Enter your license key to access the platform</div>
+<label>License Key</label>
+<input type="text" id="licenseKey" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX">
+<button onclick="doLogin()">Activate Access</button>
+<div class="error" id="errMsg"></div>
+<div class="buy-link">No key? <a href="https://colepresley.gumroad.com/l/apex-swarm" target="_blank">Get APEX SWARM →</a></div>
 </div>
-
 <script>
-const BASE = location.origin;
-const KEY = localStorage.getItem('apex_key') || '';
-let nodes = [];
-let connections = [];
-let events = [];
-let selectedNode = null;
-let sseEvents = [];
-let currentTab = 'agents';
-let canvas, ctx, W, H;
-let animFrame;
-let mouseX = 0, mouseY = 0;
-
-// ─── API ─────────────────────────
-async function api(p) {
-  try {
-    const r = await fetch(BASE + p, { headers: { 'X-Api-Key': KEY } });
-    return await r.json();
-  } catch(e) { return {}; }
+if(localStorage.getItem("apex_key")){window.location.href="/dashboard"}
+document.getElementById("licenseKey").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
+async function doLogin(){
+  const key=document.getElementById("licenseKey").value.trim();
+  if(!key){showError("Please enter your license key.");return;}
+  try{
+    const res=await fetch("/api/v1/license/validate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({license_key:key})});
+    const data=await res.json();
+    if(data.valid){localStorage.setItem("apex_key",key);localStorage.setItem("apex_tier",data.tier);window.location.href="/dashboard";}
+    else{showError(data.error||"Invalid license key.");}
+  }catch(e){showError("Connection error. Please try again.");}
 }
-
-// ─── CANVAS SETUP ────────────────
-function initCanvas() {
-  canvas = document.getElementById('swarmCanvas');
-  ctx = canvas.getContext('2d');
-  resize();
-  window.addEventListener('resize', resize);
-  canvas.addEventListener('mousemove', e => { mouseX = e.offsetX; mouseY = e.offsetY; });
-  canvas.addEventListener('click', handleClick);
-}
-
-function resize() {
-  const area = canvas.parentElement;
-  W = area.clientWidth;
-  H = area.clientHeight;
-  canvas.width = W * devicePixelRatio;
-  canvas.height = H * devicePixelRatio;
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-  // Reposition nodes
-  nodes.forEach(n => {
-    if (n.x > W) n.x = Math.random() * W * 0.8 + W * 0.1;
-    if (n.y > H) n.y = Math.random() * H * 0.8 + H * 0.1;
-  });
-}
-
-// ─── NODE MANAGEMENT ─────────────
-const COLORS = {
-  running: { fill: '#00f0a0', glow: 'rgba(0,240,160,0.3)', ring: 'rgba(0,240,160,0.15)' },
-  completed: { fill: '#00d4ff', glow: 'rgba(0,212,255,0.2)', ring: 'rgba(0,212,255,0.1)' },
-  failed: { fill: '#ff3366', glow: 'rgba(255,51,102,0.2)', ring: 'rgba(255,51,102,0.1)' },
-  daemon: { fill: '#ffb800', glow: 'rgba(255,184,0,0.2)', ring: 'rgba(255,184,0,0.1)' },
-  delegating: { fill: '#7733ff', glow: 'rgba(119,51,255,0.3)', ring: 'rgba(119,51,255,0.15)' },
-};
-
-const ICONS = {
-  'research': '🔬', 'crypto-research': '💎', 'market-analyst': '📊', 'blog-writer': '✍️',
-  'social-media': '📣', 'code-reviewer': '💻', 'data-analyst': '📈', 'seo-specialist': '🎯',
-  'copywriter': '✏️', 'defi-analyst': '🏦', 'macro-analyst': '🌐', 'pitch-deck': '📋',
-  'summarizer': '📝', 'api-designer': '🔧', 'legal-analyst': '⚖️',
-};
-
-function addNode(agent) {
-  // Check if already exists
-  const existing = nodes.find(n => n.id === agent.id);
-  if (existing) {
-    existing.status = agent.status;
-    existing.result = agent.result;
-    return existing;
-  }
-
-  const padding = 80;
-  const n = {
-    id: agent.id,
-    type: agent.agent_type || agent.type || 'research',
-    name: agent.agent_type || agent.type || 'agent',
-    task: agent.task_description || agent.task || '',
-    status: agent.status || 'running',
-    result: agent.result || '',
-    x: padding + Math.random() * (W - padding * 2),
-    y: padding + Math.random() * (H - padding * 2),
-    vx: (Math.random() - 0.5) * 0.3,
-    vy: (Math.random() - 0.5) * 0.3,
-    radius: agent.status === 'daemon' ? 22 : 16,
-    pulsePhase: Math.random() * Math.PI * 2,
-    born: Date.now(),
-  };
-  nodes.push(n);
-
-  // Keep max 50 nodes
-  if (nodes.length > 50) nodes.shift();
-
-  return n;
-}
-
-function addConnection(fromId, toId, type = 'delegate') {
-  connections.push({ from: fromId, to: toId, type, born: Date.now(), alpha: 1 });
-}
-
-// ─── RENDER LOOP ─────────────────
-function render() {
-  ctx.clearRect(0, 0, W, H);
-  const t = Date.now() / 1000;
-
-  // Draw grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.015)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-  for (let y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-
-  // Draw connections
-  connections.forEach((c, i) => {
-    const from = nodes.find(n => n.id === c.from);
-    const to = nodes.find(n => n.id === c.to);
-    if (!from || !to) return;
-
-    const age = (Date.now() - c.born) / 1000;
-    c.alpha = Math.max(0, 1 - age / 8); // Fade over 8s
-
-    if (c.alpha <= 0) { connections.splice(i, 1); return; }
-
-    // Animated dashed line
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const dashOffset = (t * 40) % 20;
-
-    ctx.strokeStyle = `rgba(119,51,255,${c.alpha * 0.4})`;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([6, 8]);
-    ctx.lineDashOffset = -dashOffset;
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Arrow head
-    const angle = Math.atan2(dy, dx);
-    const arrowX = to.x - Math.cos(angle) * (to.radius + 8);
-    const arrowY = to.y - Math.sin(angle) * (to.radius + 8);
-    ctx.fillStyle = `rgba(119,51,255,${c.alpha * 0.6})`;
-    ctx.beginPath();
-    ctx.moveTo(arrowX, arrowY);
-    ctx.lineTo(arrowX - Math.cos(angle - 0.4) * 8, arrowY - Math.sin(angle - 0.4) * 8);
-    ctx.lineTo(arrowX - Math.cos(angle + 0.4) * 8, arrowY - Math.sin(angle + 0.4) * 8);
-    ctx.fill();
-
-    // "Delegating" label
-    if (c.alpha > 0.5) {
-      ctx.fillStyle = `rgba(119,51,255,${c.alpha * 0.5})`;
-      ctx.font = '9px "IBM Plex Mono", monospace';
-      ctx.fillText('delegate', (from.x + to.x) / 2 - 20, (from.y + to.y) / 2 - 6);
-    }
-  });
-
-  // Update and draw nodes
-  nodes.forEach(n => {
-    // Drift
-    n.x += n.vx;
-    n.y += n.vy;
-
-    // Boundaries
-    if (n.x < 40 || n.x > W - 40) n.vx *= -1;
-    if (n.y < 40 || n.y > H - 40) n.vy *= -1;
-
-    // Gentle attraction to center
-    n.vx += (W / 2 - n.x) * 0.00003;
-    n.vy += (H / 2 - n.y) * 0.00003;
-
-    // Repel from other nodes
-    nodes.forEach(o => {
-      if (o.id === n.id) return;
-      const dx = n.x - o.x;
-      const dy = n.y - o.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 80) {
-        const force = (80 - dist) / 80 * 0.05;
-        n.vx += (dx / dist) * force;
-        n.vy += (dy / dist) * force;
-      }
-    });
-
-    // Damping
-    n.vx *= 0.995;
-    n.vy *= 0.995;
-
-    const colors = COLORS[n.status] || COLORS.running;
-    const pulse = Math.sin(t * 2 + n.pulsePhase) * 0.5 + 0.5;
-    const isHovered = Math.abs(mouseX - n.x) < 30 && Math.abs(mouseY - n.y) < 30;
-    const isSelected = selectedNode && selectedNode.id === n.id;
-
-    // Outer ring (pulse for running)
-    if (n.status === 'running' || n.status === 'daemon') {
-      const ringR = n.radius + 8 + pulse * 6;
-      ctx.fillStyle = colors.ring;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, ringR, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Selection ring
-    if (isSelected) {
-      ctx.strokeStyle = colors.fill;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.radius + 14, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Glow
-    const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.radius * 2.5);
-    grad.addColorStop(0, colors.glow);
-    grad.addColorStop(1, 'transparent');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.radius * 2.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Node body
-    ctx.fillStyle = isHovered ? colors.fill : `${colors.fill}cc`;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, isHovered ? n.radius + 2 : n.radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Inner dark circle
-    ctx.fillStyle = 'rgba(5,5,8,0.6)';
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.radius * 0.6, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Icon
-    const icon = ICONS[n.name] || '◈';
-    ctx.font = `${n.radius * 0.7}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(icon, n.x, n.y);
-
-    // Label
-    ctx.font = '10px "IBM Plex Mono", monospace';
-    ctx.fillStyle = isHovered ? colors.fill : 'rgba(255,255,255,0.4)';
-    ctx.textAlign = 'center';
-    ctx.fillText(n.name, n.x, n.y + n.radius + 14);
-
-    // Status label for hovered
-    if (isHovered) {
-      ctx.font = '9px "IBM Plex Mono", monospace';
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.fillText(n.status, n.x, n.y + n.radius + 26);
-
-      // Task preview
-      if (n.task) {
-        ctx.font = '10px "Instrument Sans", sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        const taskPreview = n.task.length > 40 ? n.task.slice(0, 40) + '...' : n.task;
-        ctx.fillText(taskPreview, n.x, n.y + n.radius + 38);
-      }
-    }
-  });
-
-  // Center label when empty
-  if (nodes.length === 0) {
-    ctx.font = '14px "Instrument Sans", sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.textAlign = 'center';
-    ctx.fillText('Deploy agents to see them here', W / 2, H / 2);
-    ctx.font = '11px "IBM Plex Mono", monospace';
-    ctx.fillText('Listening for activity...', W / 2, H / 2 + 24);
-  }
-
-  animFrame = requestAnimationFrame(render);
-}
-
-function handleClick(e) {
-  const x = e.offsetX, y = e.offsetY;
-  const clicked = nodes.find(n => Math.sqrt((n.x - x) ** 2 + (n.y - y) ** 2) < n.radius + 8);
-  selectedNode = clicked || null;
-  updateDetail();
-  renderSidebar();
-}
-
-// ─── SIDEBAR ─────────────────────
-function switchTab(tab) {
-  currentTab = tab;
-  document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('active', t.textContent.toLowerCase() === tab));
-  renderSidebar();
-}
-
-function renderSidebar() {
-  const el = document.getElementById('sideContent');
-  if (currentTab === 'agents') {
-    if (nodes.length === 0) {
-      el.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text3);font-size:13px">No agents active<br><span style="font-size:11px">Deploy from the Command Center</span></div>';
-      return;
-    }
-    el.innerHTML = nodes.slice().reverse().map(n => {
-      const colors = { running: 'var(--mint)', completed: 'var(--cyan)', failed: 'var(--rose)', daemon: 'var(--amber)' };
-      const bgColors = { running: 'rgba(0,240,160,0.1)', completed: 'rgba(0,212,255,0.1)', failed: 'rgba(255,51,102,0.1)', daemon: 'rgba(255,184,0,0.1)' };
-      const isSelected = selectedNode && selectedNode.id === n.id;
-      return `<div class="agent-item${isSelected ? ' selected' : ''}" onclick="selectNode('${n.id}')">
-        <div class="agent-item-header">
-          <div class="agent-dot" style="background:${colors[n.status] || colors.running}"></div>
-          <div class="agent-item-name">${ICONS[n.name] || '◈'} ${n.name}</div>
-          <div class="agent-item-badge" style="background:${bgColors[n.status] || bgColors.running};color:${colors[n.status] || colors.running}">${n.status}</div>
-        </div>
-        <div class="agent-item-task">${n.task || 'No task description'}</div>
-      </div>`;
-    }).join('');
-  } else if (currentTab === 'events') {
-    if (sseEvents.length === 0) {
-      el.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text3);font-size:13px">Waiting for events...</div>';
-      return;
-    }
-    el.innerHTML = sseEvents.slice().reverse().slice(0, 50).map(e => `<div class="event-log-item">
-      <div class="event-log-time">${new Date(e.timestamp).toLocaleTimeString()}</div>
-      <div class="event-log-msg"><strong>${e.agent_name || e.agent_type || 'system'}</strong> ${e.message || e.event_type || ''}</div>
-    </div>`).join('');
-  } else if (currentTab === 'daemons') {
-    const daemonNodes = nodes.filter(n => n.status === 'daemon');
-    if (daemonNodes.length === 0) {
-      el.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--text3);font-size:13px">No daemons running<br><span style="font-size:11px">Start from Command Center → Daemons</span></div>';
-      return;
-    }
-    el.innerHTML = daemonNodes.map(n => `<div class="agent-item" onclick="selectNode('${n.id}')">
-      <div class="agent-item-header">
-        <div class="agent-dot" style="background:var(--amber);box-shadow:0 0 8px var(--amberglow);animation:breathe 2s ease infinite"></div>
-        <div class="agent-item-name">${n.name}</div>
-        <div class="agent-item-badge" style="background:rgba(255,184,0,0.1);color:var(--amber)">LIVE</div>
-      </div>
-      <div class="agent-item-task">${n.task || 'Monitoring...'}</div>
-    </div>`).join('');
-  }
-}
-
-function selectNode(id) {
-  selectedNode = nodes.find(n => n.id === id) || null;
-  updateDetail();
-  renderSidebar();
-}
-
-function updateDetail() {
-  const panel = document.getElementById('detailPanel');
-  if (!selectedNode) { panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  const n = selectedNode;
-  const colors = { running: 'var(--mint)', completed: 'var(--cyan)', failed: 'var(--rose)', daemon: 'var(--amber)' };
-  panel.innerHTML = `
-    <div class="detail-title"><div class="agent-dot" style="background:${colors[n.status]||colors.running}"></div>${ICONS[n.name]||'◈'} ${n.name}</div>
-    <div class="detail-field">Status: <span style="color:${colors[n.status]||colors.running}">${n.status}</span></div>
-    <div class="detail-field">ID: <span>${n.id.slice(0, 12)}</span></div>
-    ${n.task ? `<div class="detail-field">Task: <span>${n.task.slice(0, 120)}</span></div>` : ''}
-    ${n.result ? `<div class="detail-result">${n.result.slice(0, 500).replace(/</g, '&lt;')}</div>` : ''}
-  `;
-}
-
-// ─── DATA LOADING ────────────────
-async function loadInitialData() {
-  // Load recent agents
-  const recent = await api('/api/v1/agents/recent?limit=20');
-  (recent.agents || []).forEach(a => addNode(a));
-
-  // Load daemons
-  const daemons = await api('/api/v1/daemons');
-  (daemons.daemons || []).forEach(d => {
-    addNode({
-      id: d.daemon_id,
-      agent_type: d.agent_name || d.agent_type,
-      task_description: d.task_description || `Running every ${d.interval_seconds}s`,
-      status: 'daemon',
-    });
-  });
-
-  // Load god-eye stats
-  const ge = await api('/api/v1/god-eye');
-  document.getElementById('statActive').textContent = ge.active_agents || 0;
-  document.getElementById('statDaemons').textContent = ge.active_daemons || 0;
-
-  renderSidebar();
-}
-
-// ─── SSE ─────────────────────────
-function connectSSE() {
-  const sse = new EventSource(BASE + '/api/v1/events/stream');
-  sse.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      if (!data.event_type) return;
-
-      sseEvents.push(data);
-      if (sseEvents.length > 200) sseEvents.shift();
-      document.getElementById('statEvents').textContent = sseEvents.length;
-
-      // Add or update node based on event
-      if (data.event_type === 'agent.started' || data.event_type === 'agent_started') {
-        const node = addNode({
-          id: data.agent_id,
-          agent_type: data.agent_type,
-          task_description: data.message,
-          status: 'running',
-        });
-        // Flash effect
-        node.radius = 24;
-        setTimeout(() => { node.radius = 16; }, 500);
-      }
-      else if (data.event_type === 'agent.completed' || data.event_type === 'agent_completed') {
-        const node = nodes.find(n => n.id === data.agent_id);
-        if (node) {
-          node.status = 'completed';
-          node.result = data.data?.result_preview || '';
-        }
-      }
-      else if (data.event_type === 'agent.failed' || data.event_type === 'agent_failed') {
-        const node = nodes.find(n => n.id === data.agent_id);
-        if (node) node.status = 'failed';
-      }
-      else if (data.event_type === 'daemon.alert' || data.event_type === 'daemon_alert') {
-        const node = nodes.find(n => n.id === data.agent_id);
-        if (node) {
-          node.radius = 28;
-          setTimeout(() => { node.radius = 22; }, 1000);
-        }
-      }
-
-      // Update stats
-      const running = nodes.filter(n => n.status === 'running').length;
-      const daemonCount = nodes.filter(n => n.status === 'daemon').length;
-      document.getElementById('statActive').textContent = running;
-      document.getElementById('statDaemons').textContent = daemonCount;
-
-      if (currentTab === 'events') renderSidebar();
-    } catch(x) {}
-  };
-  sse.onerror = () => setTimeout(connectSSE, 5000);
-}
-
-// ─── INIT ────────────────────────
-initCanvas();
-loadInitialData();
-connectSSE();
-render();
+function showError(msg){const e=document.getElementById("errMsg");e.textContent=msg;e.style.display="block";}
 </script>
-</body>
-</html>
-"""
-
-
-@app.get("/swarm", response_class=HTMLResponse)
-async def swarm_view():
-    return HTMLResponse(SWARM_VIEW_HTML)
-
-
-LANDING_HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>APEX SWARM — Autonomous AI Agents for the Enterprise</title>
-<meta name="description" content="Deploy 66+ autonomous AI agents that research, analyze, write, and execute 24/7. Multi-model, multi-channel, zero setup.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{
-  --bg:#050508;--bg2:#0a0a12;--surface:#0e0e18;--surface2:#141422;
-  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
-  --text:#f0f0f8;--text2:#8888a8;--text3:#555570;
-  --mint:#00f0a0;--mint2:#00cc80;--mintbg:rgba(0,240,160,0.06);--mintglow:rgba(0,240,160,0.2);
-  --cyan:#00d4ff;--amber:#ffb800;--rose:#ff3366;--violet:#7733ff;
-}
-html{font-size:16px;scroll-behavior:smooth}
-body{background:var(--bg);color:var(--text);font-family:'Instrument Sans',sans-serif;overflow-x:hidden}
-::selection{background:var(--mint);color:var(--bg)}
-a{color:var(--mint);text-decoration:none}
-
-/* ─── GRAIN ─── */
-body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;opacity:0.025;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-
-/* ─── NAV ─── */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:18px 40px;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(20px);background:rgba(5,5,8,0.8);border-bottom:1px solid var(--border)}
-.nav-logo{font-family:'Playfair Display',serif;font-weight:900;font-size:20px;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.nav-links{display:flex;gap:32px;align-items:center}
-.nav-links a{color:var(--text2);font-size:14px;font-weight:500;transition:color 0.2s}
-.nav-links a:hover{color:var(--text)}
-.nav-cta{background:var(--mint);color:var(--bg);padding:9px 22px;border-radius:8px;font-weight:600;font-size:13px;border:none;cursor:pointer;transition:all 0.2s}
-.nav-cta:hover{background:var(--mint2);transform:translateY(-1px);box-shadow:0 4px 20px var(--mintglow)}
-
-/* ─── HERO ─── */
-.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:120px 24px 80px;position:relative}
-.hero::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:800px;height:800px;background:radial-gradient(circle,rgba(0,240,160,0.04) 0%,transparent 70%);pointer-events:none}
-.hero-badge{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--mint);margin-bottom:28px;display:flex;align-items:center;gap:10px;justify-content:center}
-.hero-badge::before,.hero-badge::after{content:'';width:40px;height:1px;background:linear-gradient(90deg,transparent,var(--mint))}
-.hero-badge::after{background:linear-gradient(90deg,var(--mint),transparent)}
-h1{font-family:'Playfair Display',serif;font-size:clamp(48px,7vw,88px);font-weight:900;line-height:1.05;letter-spacing:-2px;max-width:900px;margin-bottom:24px}
-h1 em{font-style:italic;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.hero-sub{color:var(--text2);font-size:18px;max-width:560px;line-height:1.7;margin-bottom:40px}
-.hero-ctas{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center}
-.btn-primary{background:var(--mint);color:var(--bg);padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;border:none;cursor:pointer;transition:all 0.25s;letter-spacing:0.3px}
-.btn-primary:hover{background:var(--mint2);transform:translateY(-2px);box-shadow:0 8px 32px var(--mintglow)}
-.btn-ghost{border:1px solid var(--border2);color:var(--text);padding:14px 32px;border-radius:10px;font-weight:500;font-size:15px;background:transparent;cursor:pointer;transition:all 0.2s}
-.btn-ghost:hover{border-color:var(--mint);color:var(--mint)}
-
-/* ─── LIVE TICKER ─── */
-.ticker{margin-top:60px;overflow:hidden;width:100%;max-width:1000px;position:relative;height:38px;mask-image:linear-gradient(90deg,transparent,black 10%,black 90%,transparent)}
-.ticker-track{display:flex;gap:40px;animation:scroll 30s linear infinite;width:max-content}
-@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-.ticker-item{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text3);white-space:nowrap;display:flex;align-items:center;gap:8px}
-.ticker-dot{width:5px;height:5px;border-radius:50%;background:var(--mint);animation:blink 2s ease infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
-
-/* ─── STATS BAR ─── */
-.stats{display:flex;justify-content:center;gap:48px;padding:60px 24px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
-.stat{text-align:center}
-.stat-num{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:600;background:linear-gradient(135deg,var(--mint),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.stat-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-top:6px}
-
-/* ─── SECTIONS ─── */
-section{padding:100px 24px}
-.section-inner{max-width:1100px;margin:0 auto}
-.section-label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--mint);margin-bottom:16px}
-.section-title{font-family:'Playfair Display',serif;font-size:clamp(32px,4vw,48px);font-weight:800;letter-spacing:-1px;margin-bottom:16px;max-width:700px}
-.section-desc{color:var(--text2);font-size:16px;max-width:560px;line-height:1.7;margin-bottom:48px}
-
-/* ─── FEATURE GRID ─── */
-.features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.feature{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;transition:all 0.3s;position:relative;overflow:hidden}
-.feature:hover{border-color:var(--border2);transform:translateY(-3px)}
-.feature::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--mint),transparent);opacity:0;transition:opacity 0.3s}
-.feature:hover::before{opacity:1}
-.feature-icon{font-size:28px;margin-bottom:14px}
-.feature-title{font-weight:700;font-size:16px;margin-bottom:6px}
-.feature-desc{color:var(--text2);font-size:13.5px;line-height:1.6}
-
-/* ─── HOW IT WORKS ─── */
-.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:2px}
-.step{background:var(--surface);padding:32px 24px;text-align:center;position:relative}
-.step:first-child{border-radius:16px 0 0 16px}
-.step:last-child{border-radius:0 16px 16px 0}
-.step-num{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mint);letter-spacing:2px;margin-bottom:12px}
-.step-title{font-weight:700;font-size:15px;margin-bottom:6px}
-.step-desc{color:var(--text2);font-size:13px;line-height:1.5}
-
-/* ─── AGENTS SHOWCASE ─── */
-.agents-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
-.agent-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;transition:all 0.2s;cursor:default}
-.agent-card:hover{border-color:var(--mint)}
-.agent-card-icon{font-size:24px;margin-bottom:8px}
-.agent-card-name{font-weight:600;font-size:13.5px;margin-bottom:4px}
-.agent-card-desc{color:var(--text3);font-size:11.5px;line-height:1.4}
-
-/* ─── PRICING ─── */
-.pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.price-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;position:relative;transition:all 0.3s}
-.price-card:hover{border-color:var(--border2)}
-.price-card.featured{border-color:var(--mint);background:linear-gradient(180deg,rgba(0,240,160,0.03),var(--surface))}
-.price-card.featured::before{content:'POPULAR';position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--mint);color:var(--bg);font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:2px;padding:4px 14px;border-radius:6px;font-weight:600}
-.price-tier{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
-.price-amount{font-family:'Playfair Display',serif;font-size:44px;font-weight:800;margin-bottom:4px}
-.price-amount span{font-size:16px;color:var(--text2);font-family:'Instrument Sans',sans-serif;font-weight:400}
-.price-desc{color:var(--text2);font-size:13px;margin-bottom:24px}
-.price-features{list-style:none;margin-bottom:28px}
-.price-features li{padding:6px 0;font-size:13.5px;color:var(--text2);display:flex;align-items:center;gap:8px}
-.price-features li::before{content:'◉';color:var(--mint);font-size:8px}
-.price-btn{display:block;width:100%;text-align:center;padding:12px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;transition:all 0.2s;border:none;font-family:'Instrument Sans',sans-serif}
-.price-btn-mint{background:var(--mint);color:var(--bg)}
-.price-btn-mint:hover{background:var(--mint2);box-shadow:0 4px 20px var(--mintglow)}
-.price-btn-ghost{background:transparent;border:1px solid var(--border2);color:var(--text)}
-.price-btn-ghost:hover{border-color:var(--mint);color:var(--mint)}
-
-/* ─── COMPARISON ─── */
-.compare-table{width:100%;border-collapse:collapse;font-size:13.5px}
-.compare-table th{text-align:left;padding:12px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border)}
-.compare-table td{padding:12px 16px;border-bottom:1px solid var(--border)}
-.compare-table tr:hover td{background:rgba(255,255,255,0.015)}
-.check{color:var(--mint)}
-.cross{color:var(--text3)}
-
-/* ─── CTA SECTION ─── */
-.cta-section{text-align:center;padding:120px 24px;position:relative}
-.cta-section::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:600px;height:600px;background:radial-gradient(circle,rgba(0,240,160,0.05) 0%,transparent 70%);pointer-events:none}
-.cta-title{font-family:'Playfair Display',serif;font-size:clamp(36px,5vw,56px);font-weight:800;letter-spacing:-1px;margin-bottom:16px}
-.cta-sub{color:var(--text2);font-size:17px;margin-bottom:36px;max-width:480px;margin-left:auto;margin-right:auto}
-
-/* ─── FOOTER ─── */
-footer{border-top:1px solid var(--border);padding:40px 24px;text-align:center}
-footer p{font-size:13px;color:var(--text3)}
-footer a{color:var(--text2)}
-
-/* ─── ANIMATIONS ─── */
-@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
-.anim{opacity:0;transform:translateY(30px);transition:all 0.7s cubic-bezier(0.16,1,0.3,1)}
-.anim.visible{opacity:1;transform:translateY(0)}
-
-/* ─── RESPONSIVE ─── */
-@media(max-width:900px){.features{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.agents-grid{grid-template-columns:1fr 1fr}.pricing{grid-template-columns:1fr}.stats{flex-wrap:wrap;gap:24px}.nav-links a:not(.nav-cta){display:none}.step:first-child,.step:last-child{border-radius:0}.step:first-child{border-radius:16px 16px 0 0}.step:last-child{border-radius:0 0 16px 16px}}
-</style>
-</head>
-<body>
-
-<!-- NAV -->
-<nav>
-  <div class="nav-logo">APEX SWARM</div>
-  <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#agents">Agents</a>
-    <a href="#pricing">Pricing</a>
-    <a href="#compare">Compare</a>
-    <a href="/dashboard" class="nav-cta">Open Dashboard →</a>
-  </div>
-</nav>
-
-<!-- HERO -->
-<div class="hero">
-  <div class="hero-badge">Autonomous AI Platform</div>
-  <h1>Your workforce<br>never <em>sleeps</em></h1>
-  <p class="hero-sub">66 autonomous AI agents that research, analyze, write, and execute — 24/7. Deploy a swarm in seconds. No infrastructure. No babysitting.</p>
-  <div class="hero-ctas">
-    <a href="/dashboard"><button class="btn-primary">Start deploying agents →</button></a>
-    <a href="#features"><button class="btn-ghost">See how it works</button></a>
-  </div>
-
-  <!-- LIVE TICKER -->
-  <div class="ticker">
-    <div class="ticker-track">
-      <div class="ticker-item"><div class="ticker-dot"></div>crypto-research analyzing BTC market structure</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>blog-writer creating SEO content for fintech startup</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>data-analyst processing Q1 revenue metrics</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>market-analyst scanning emerging AI companies</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>defi-analyst monitoring yield farming opportunities</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>code-reviewer auditing smart contract security</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>social-media generating viral thread for product launch</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>competitor-intel tracking OpenClaw latest features</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>crypto-research analyzing BTC market structure</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>blog-writer creating SEO content for fintech startup</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>data-analyst processing Q1 revenue metrics</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>market-analyst scanning emerging AI companies</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>defi-analyst monitoring yield farming opportunities</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>code-reviewer auditing smart contract security</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>social-media generating viral thread for product launch</div>
-      <div class="ticker-item"><div class="ticker-dot"></div>competitor-intel tracking OpenClaw latest features</div>
-    </div>
-  </div>
-</div>
-
-<!-- STATS -->
-<div class="stats">
-  <div class="stat"><div class="stat-num">66+</div><div class="stat-label">Specialized Agents</div></div>
-  <div class="stat"><div class="stat-num">12</div><div class="stat-label">Built-in Tools</div></div>
-  <div class="stat"><div class="stat-num">9</div><div class="stat-label">LLM Providers</div></div>
-  <div class="stat"><div class="stat-num">24/7</div><div class="stat-label">Autonomous</div></div>
-  <div class="stat"><div class="stat-num">95</div><div class="stat-label">API Endpoints</div></div>
-</div>
-
-<!-- FEATURES -->
-<section id="features">
-  <div class="section-inner">
-    <div class="section-label anim">Capabilities</div>
-    <div class="section-title anim">Not another chatbot.<br>A full operating system.</div>
-    <div class="section-desc anim">Every feature designed for autonomous execution. Agents don't wait for instructions — they complete missions.</div>
-    <div class="features">
-      <div class="feature anim"><div class="feature-icon">◆</div><div class="feature-title">Autonomous Goals</div><div class="feature-desc">Give a business objective. The swarm builds an org chart, decomposes into projects and tasks, assigns role-based agents, and executes end-to-end.</div></div>
-      <div class="feature anim"><div class="feature-icon">◇</div><div class="feature-title">Agent-to-Agent Protocol</div><div class="feature-desc">Agents hire other agents. A lead agent decomposes complex tasks, delegates to specialists, and synthesizes results into one deliverable.</div></div>
-      <div class="feature anim"><div class="feature-icon">◌</div><div class="feature-title">24/7 Daemons</div><div class="feature-desc">Always-on monitors that scan markets, track competitors, watch for opportunities. Alert you on Telegram when conditions are met.</div></div>
-      <div class="feature anim"><div class="feature-icon">◫</div><div class="feature-title">Agent Marketplace</div><div class="feature-desc">Create, publish, and sell custom agents. Creators earn 80% of every sale. Install community agents with one click.</div></div>
-      <div class="feature anim"><div class="feature-icon">◑</div><div class="feature-title">Multi-Model Intelligence</div><div class="feature-desc">Route tasks to Claude, GPT-4o, Gemini, Llama, DeepSeek, Mistral, Grok — or your own local models. 9 providers, 30+ models.</div></div>
-      <div class="feature anim"><div class="feature-icon">⬡</div><div class="feature-title">Workflow Automation</div><div class="feature-desc">Trigger → Condition → Action engine. When a daemon alerts, deploy an agent. When an agent completes, notify Slack. Chain anything.</div></div>
-      <div class="feature anim"><div class="feature-icon">◰</div><div class="feature-title">Role-Based Permissions</div><div class="feature-desc">10 org chart roles — CEO, CTO, CMO, CFO, Researcher, Writer, Analyst, Marketer, Support, Security — each with scoped tool and email access.</div></div>
-      <div class="feature anim"><div class="feature-icon">◎</div><div class="feature-title">Voice Interface</div><div class="feature-desc">Talk to your swarm. Voice messages transcribed via Whisper, agents respond with TTS. 14 voice options across 2 providers.</div></div>
-      <div class="feature anim"><div class="feature-icon">◉</div><div class="feature-title">Enterprise Hardened</div><div class="feature-desc">Retry logic, circuit breakers, input sanitization, audit trail, metrics, conversation persistence, Swagger API docs.</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- HOW IT WORKS -->
-<section style="background:var(--bg2)">
-  <div class="section-inner">
-    <div class="section-label anim">How it works</div>
-    <div class="section-title anim">Four steps to autonomous operations</div>
-    <div class="section-desc anim">From zero to a running AI workforce in under 60 seconds.</div>
-    <div class="steps anim">
-      <div class="step"><div class="step-num">01</div><div class="step-title">Define a goal</div><div class="step-desc">"Monitor DeFi yields and alert me when APY exceeds 15%"</div></div>
-      <div class="step"><div class="step-num">02</div><div class="step-title">Swarm decomposes</div><div class="step-desc">AI breaks it into projects, assigns roles, selects the best agents</div></div>
-      <div class="step"><div class="step-num">03</div><div class="step-title">Agents execute</div><div class="step-desc">Specialists research, analyze, and monitor — using live tools and APIs</div></div>
-      <div class="step"><div class="step-num">04</div><div class="step-title">Results delivered</div><div class="step-desc">Reports in your dashboard. Alerts on Telegram. Actions via webhooks.</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- AGENTS -->
-<section id="agents">
-  <div class="section-inner">
-    <div class="section-label anim">The Swarm</div>
-    <div class="section-title anim">66 agents. 6 divisions.</div>
-    <div class="section-desc anim">Each agent is a specialist. Together, they're an autonomous workforce.</div>
-    <div class="agents-grid anim">
-      <div class="agent-card"><div class="agent-card-icon">🔬</div><div class="agent-card-name">Deep Research</div><div class="agent-card-desc">Multi-source investigation with citations</div></div>
-      <div class="agent-card"><div class="agent-card-icon">📊</div><div class="agent-card-name">Market Analyst</div><div class="agent-card-desc">Technical analysis and trend detection</div></div>
-      <div class="agent-card"><div class="agent-card-icon">💎</div><div class="agent-card-name">Crypto Research</div><div class="agent-card-desc">On-chain data, DeFi protocols, alpha signals</div></div>
-      <div class="agent-card"><div class="agent-card-icon">✍️</div><div class="agent-card-name">Blog Writer</div><div class="agent-card-desc">Long-form SEO content with research</div></div>
-      <div class="agent-card"><div class="agent-card-icon">📣</div><div class="agent-card-name">Social Media</div><div class="agent-card-desc">Viral threads, hooks, engagement copy</div></div>
-      <div class="agent-card"><div class="agent-card-icon">💻</div><div class="agent-card-name">Code Reviewer</div><div class="agent-card-desc">Security audits, refactoring, best practices</div></div>
-      <div class="agent-card"><div class="agent-card-icon">📈</div><div class="agent-card-name">Data Analyst</div><div class="agent-card-desc">Metrics, dashboards, statistical analysis</div></div>
-      <div class="agent-card"><div class="agent-card-icon">🎯</div><div class="agent-card-name">SEO Specialist</div><div class="agent-card-desc">Keyword research, content optimization</div></div>
-    </div>
-    <div style="text-align:center;margin-top:32px"><a href="/dashboard" style="color:var(--text2);font-size:14px">View all 66 agents in the dashboard →</a></div>
-  </div>
-</section>
-
-<!-- PRICING -->
-<section id="pricing" style="background:var(--bg2)">
-  <div class="section-inner">
-    <div class="section-label anim" style="text-align:center">Pricing</div>
-    <div class="section-title anim" style="text-align:center;margin-left:auto;margin-right:auto">Start free. Scale to enterprise.</div>
-    <div class="section-desc anim" style="text-align:center;margin-left:auto;margin-right:auto">Bring your own LLM API key. Pay only for what your agents use.</div>
-    <div class="pricing anim">
-      <div class="price-card">
-        <div class="price-tier">Starter</div>
-        <div class="price-amount">$0<span>/mo</span></div>
-        <div class="price-desc">Try the swarm. Deploy agents on demand.</div>
-        <ul class="price-features">
-          <li>10 agent deploys / day</li>
-          <li>All 66 agent types</li>
-          <li>Dashboard access</li>
-          <li>Telegram channel</li>
-          <li>Community support</li>
-        </ul>
-        <button class="price-btn price-btn-ghost" onclick="location.href='/dashboard'">Get started</button>
-      </div>
-      <div class="price-card featured">
-        <div class="price-tier">Pro</div>
-        <div class="price-amount">$49<span>/mo</span></div>
-        <div class="price-desc">Unlimited agents. Full autonomy.</div>
-        <ul class="price-features">
-          <li>Unlimited agent deploys</li>
-          <li>24/7 daemons (5 concurrent)</li>
-          <li>A2A delegation protocol</li>
-          <li>Autonomous goals</li>
-          <li>Marketplace access</li>
-          <li>Voice interface</li>
-          <li>Multi-model routing</li>
-          <li>Priority support</li>
-        </ul>
-        <button class="price-btn price-btn-mint" onclick="location.href='https://apexswarm.gumroad.com/l/pro'">Start Pro trial →</button>
-      </div>
-      <div class="price-card">
-        <div class="price-tier">Enterprise</div>
-        <div class="price-amount">Custom</div>
-        <div class="price-desc">For teams running AI operations at scale.</div>
-        <ul class="price-features">
-          <li>Everything in Pro</li>
-          <li>Unlimited daemons</li>
-          <li>Custom agent development</li>
-          <li>Dedicated infrastructure</li>
-          <li>SLA guarantee</li>
-          <li>SSO / SAML</li>
-          <li>Audit & compliance reports</li>
-          <li>Account manager</li>
-        </ul>
-        <button class="price-btn price-btn-ghost" onclick="location.href='mailto:enterprise@apex-swarm.com'">Contact sales</button>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- COMPARE -->
-<section id="compare">
-  <div class="section-inner">
-    <div class="section-label anim" style="text-align:center">Why APEX SWARM</div>
-    <div class="section-title anim" style="text-align:center;margin-left:auto;margin-right:auto">Built different.</div>
-    <div style="overflow-x:auto;margin-top:48px" class="anim">
-      <table class="compare-table">
-        <thead><tr><th>Capability</th><th>APEX SWARM</th><th>OpenClaw</th><th>Claude Code</th><th>ChatGPT</th></tr></thead>
-        <tbody>
-          <tr><td>Multi-agent orchestration</td><td class="check">◉ 66 agents + A2A</td><td class="cross">1 agent + skills</td><td class="check">Agent Teams</td><td class="cross">Single chat</td></tr>
-          <tr><td>Autonomous goals</td><td class="check">◉ Goal → Org → Execute</td><td class="cross">—</td><td class="cross">—</td><td class="cross">—</td></tr>
-          <tr><td>24/7 daemons</td><td class="check">◉ Always-on monitors</td><td class="check">Cron + heartbeat</td><td class="check">/loop command</td><td class="cross">—</td></tr>
-          <tr><td>Agent marketplace</td><td class="check">◉ Create + sell agents</td><td class="cross">Free skills only</td><td class="check">Skills marketplace</td><td class="cross">GPT Store</td></tr>
-          <tr><td>Multi-model</td><td class="check">◉ 9 providers, 30+ models</td><td class="check">Multi-provider</td><td class="cross">Claude only</td><td class="cross">GPT only</td></tr>
-          <tr><td>Role-based permissions</td><td class="check">◉ 10 org chart roles</td><td class="cross">—</td><td class="cross">—</td><td class="cross">—</td></tr>
-          <tr><td>Zero setup</td><td class="check">◉ Cloud API</td><td class="cross">Self-hosted</td><td class="cross">Local CLI</td><td class="check">Web app</td></tr>
-          <tr><td>Voice I/O</td><td class="check">◉ STT + TTS</td><td class="check">Voice support</td><td class="check">Voice STT</td><td class="check">Voice mode</td></tr>
-          <tr><td>Enterprise security</td><td class="check">◉ Audit + sanitization</td><td class="check">SecretRef + sandbox</td><td class="check">Sandboxing</td><td class="cross">—</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-<!-- CTA -->
-<div class="cta-section">
-  <div class="section-label">Ready?</div>
-  <div class="cta-title">Deploy your first<br>agent in 30 seconds.</div>
-  <div class="cta-sub">No credit card. No infrastructure. Just results.</div>
-  <a href="/dashboard"><button class="btn-primary" style="font-size:17px;padding:16px 40px">Open Command Center →</button></a>
-</div>
-
-<!-- FOOTER -->
-<footer>
-  <p>APEX SWARM · Autonomous AI Agent Platform · <a href="/api/v1/docs">API Docs</a> · <a href="/api/v1/health">Status</a></p>
-</footer>
-
-<!-- SCROLL ANIMATIONS -->
-<script>
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      entry.target.classList.add('visible');
-    }
-  });
-}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-document.querySelectorAll('.anim').forEach(el => observer.observe(el));
-</script>
-
 </body>
 </html>
 """
@@ -4607,9 +3723,25 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 let KEY = localStorage.getItem('apex_key') || '';
 let BASE = location.origin;
+if(!KEY){KEY='dev-mode';localStorage.setItem('apex_key','dev-mode');}
 let page = 'overview';
 let events = [];
 let sse = null;
+
+async function loadInitialEvents() {
+  try {
+    const r = await fetch(BASE + '/api/v1/events?limit=50', { headers: { 'X-Api-Key': KEY } });
+    const d = await r.json();
+    if (d.events && d.events.length) {
+      events = d.events;
+      if (page === 'feed') pFeed();
+      if (page === 'overview') {
+        const f = document.querySelector('#overviewFeed');
+        if (f) f.innerHTML = events.slice(-6).reverse().map(ev => '<div class="event-item"><div class="event-dot" style="background:var(--mint)"></div><div class="event-content">' + (ev.agent_name||ev.agent_type||'—') + '<div class="event-time">' + new Date(ev.timestamp).toLocaleTimeString() + '</div></div></div>').join('');
+      }
+    }
+  } catch(e) { console.error('Failed to load events:', e); }
+}
 
 async function api(p, o = {}) {
   try {
@@ -4851,56 +3983,3 @@ go('overview');
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
-
-
-# ── DAEMON AUTO-START ────────────────────────────────────────────────────────
-BOOT_DAEMONS = [
-    "crypto-monitor",
-    "defi-yield-scanner",
-    "news-sentinel",
-    "whale-watcher",
-    "competitor-tracker",
-    "competitor-intel",
-]
-
-async def autostart_daemons():
-    """Auto-start all preset daemons on boot. Idempotent — skips running ones."""
-    print("[BOOT] Starting daemon auto-start sequence...", flush=True)
-    started = 0
-    skipped = 0
-    failed = 0
-    for preset_id in BOOT_DAEMONS:
-        try:
-            # Check if already running
-            already_running = any(
-                d.get("preset_id") == preset_id and d.get("status") == "running"
-                for d in daemon_manager.daemons.values()
-            ) if hasattr(daemon_manager, "daemons") else False
-
-            if already_running:
-                print(f"[BOOT] Daemon '{preset_id}' already running — skipped", flush=True)
-                skipped += 1
-                continue
-
-            # Find preset config
-            preset = next((p for p in DAEMON_PRESETS if p["id"] == preset_id), None)
-            if not preset:
-                print(f"[BOOT] WARNING: No preset found for '{preset_id}'", flush=True)
-                failed += 1
-                continue
-
-            # Start the daemon
-            daemon_id = await daemon_manager.start_daemon(
-                agent_type=preset["agent_type"],
-                task_description=preset["task"],
-                interval_seconds=preset["interval_seconds"],
-                preset_id=preset_id,
-            )
-            print(f"[BOOT] ✅ Started '{preset_id}' → daemon_id={daemon_id} (every {preset['interval_seconds']}s)", flush=True)
-            started += 1
-
-        except Exception as e:
-            print(f"[BOOT] ❌ Failed to start '{preset_id}': {e}", flush=True)
-            failed += 1
-
-    print(f"[BOOT] Daemon auto-start complete: {started} started, {skipped} skipped, {failed} failed", flush=True)
