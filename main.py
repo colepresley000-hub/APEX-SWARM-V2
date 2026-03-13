@@ -45,6 +45,26 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_STARTER_PRICE = os.getenv("STRIPE_STARTER_PRICE", "")
+STRIPE_PRO_PRICE = os.getenv("STRIPE_PRO_PRICE", "")
+STRIPE_ENTERPRISE_PRICE = os.getenv("STRIPE_ENTERPRISE_PRICE", "")
+JWT_SECRET = os.getenv("JWT_SECRET", "apex-swarm-jwt-secret-change-in-prod")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+BASE_URL = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_STARTER_PRICE = os.getenv("STRIPE_STARTER_PRICE", "")
+STRIPE_PRO_PRICE = os.getenv("STRIPE_PRO_PRICE", "")
+STRIPE_ENTERPRISE_PRICE = os.getenv("STRIPE_ENTERPRISE_PRICE", "")
+JWT_SECRET = os.getenv("JWT_SECRET", "apex-swarm-jwt-secret-change-in-prod")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+BASE_URL = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SLACK_DEFAULT_CHANNEL = os.getenv("SLACK_DEFAULT_CHANNEL", "#ai-workforce")
 DATABASE_PATH = os.getenv("DATABASE_PATH", "apex_swarm.db")
 PORT = int(os.getenv("PORT", "8080"))
@@ -524,7 +544,145 @@ def init_db():
                     created_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS usage_log (
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    tier TEXT DEFAULT 'free',
+                    stripe_customer_id TEXT DEFAULT '',
+                    stripe_subscription_id TEXT DEFAULT '',
+                    api_key TEXT UNIQUE NOT NULL,
+                    org_id TEXT DEFAULT '',
+                    role TEXT DEFAULT 'owner',
+                    google_id TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    user_email TEXT,
+                    org_id TEXT,
+                    action TEXT NOT NULL,
+                    resource TEXT,
+                    detail TEXT,
+                    ip TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS orgs (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    slug TEXT UNIQUE NOT NULL,
+                    tier TEXT DEFAULT 'enterprise',
+                    owner_email TEXT NOT NULL,
+                    slack_webhook TEXT DEFAULT '',
+                    slack_channel TEXT DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS org_members (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT DEFAULT 'member',
+                    api_key TEXT UNIQUE NOT NULL,
+                    invited_by TEXT,
+                    joined_at TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS org_invites (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT DEFAULT 'member',
+                    token TEXT UNIQUE NOT NULL,
+                    created_by TEXT NOT NULL,
+                    used INTEGER DEFAULT 0,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    tier TEXT DEFAULT 'free',
+                    stripe_customer_id TEXT DEFAULT '',
+                    stripe_subscription_id TEXT DEFAULT '',
+                    api_key TEXT UNIQUE NOT NULL,
+                    org_id TEXT DEFAULT '',
+                    role TEXT DEFAULT 'owner',
+                    google_id TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    user_email TEXT,
+                    org_id TEXT,
+                    action TEXT NOT NULL,
+                    resource TEXT,
+                    detail TEXT,
+                    ip TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS orgs (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    slug TEXT UNIQUE NOT NULL,
+                    tier TEXT DEFAULT 'enterprise',
+                    owner_email TEXT NOT NULL,
+                    slack_webhook TEXT DEFAULT '',
+                    slack_channel TEXT DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS org_members (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT DEFAULT 'member',
+                    api_key TEXT UNIQUE NOT NULL,
+                    invited_by TEXT,
+                    joined_at TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS org_invites (
+                    id TEXT PRIMARY KEY,
+                    org_id TEXT NOT NULL,
+                    email TEXT NOT NULL,
+                    role TEXT DEFAULT 'member',
+                    token TEXT UNIQUE NOT NULL,
+                    created_by TEXT NOT NULL,
+                    used INTEGER DEFAULT 0,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+CREATE TABLE IF NOT EXISTS usage_log (
                     id TEXT PRIMARY KEY,
                     user_api_key TEXT NOT NULL,
                     agent_type TEXT NOT NULL,
@@ -943,6 +1101,82 @@ async def send_slack_daemon_alert(agent_name: str, condition: str, result: str,
     await send_slack_message(f"🚨 Alert from {agent_name}", webhook_url=url, channel=channel, blocks=blocks)
 
 
+async def send_slack_message(text, webhook_url=None, channel=None, blocks=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return False
+    payload = {"text": text}
+    if channel:
+        payload["channel"] = channel
+    if blocks:
+        payload["blocks"] = blocks
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            return resp.status_code == 200
+    except Exception as e:
+        logger.error("Slack send failed: " + str(e))
+        return False
+
+async def send_slack_agent_result(agent_type, agent_name, task, result, webhook_url=None, channel=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return
+    preview = (result or "")[:500]
+    await send_slack_message(
+        "Agent " + agent_name + " completed: " + preview,
+        webhook_url=url, channel=channel
+    )
+
+async def send_slack_daemon_alert(agent_name, condition, result, webhook_url=None, channel=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return
+    preview = (result or "")[:600]
+    await send_slack_message(
+        "ALERT from " + agent_name + " [" + condition + "]: " + preview,
+        webhook_url=url, channel=channel
+    )
+
+
+async def send_slack_message(text, webhook_url=None, channel=None, blocks=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return False
+    payload = {"text": text}
+    if channel:
+        payload["channel"] = channel
+    if blocks:
+        payload["blocks"] = blocks
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            return resp.status_code == 200
+    except Exception as e:
+        logger.error("Slack send failed: " + str(e))
+        return False
+
+async def send_slack_agent_result(agent_type, agent_name, task, result, webhook_url=None, channel=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return
+    preview = (result or "")[:500]
+    await send_slack_message(
+        "Agent " + agent_name + " completed: " + preview,
+        webhook_url=url, channel=channel
+    )
+
+async def send_slack_daemon_alert(agent_name, condition, result, webhook_url=None, channel=None):
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if not url:
+        return
+    preview = (result or "")[:600]
+    await send_slack_message(
+        "ALERT from " + agent_name + " [" + condition + "]: " + preview,
+        webhook_url=url, channel=channel
+    )
+
+
 async def validate_gumroad_license(license_key: str) -> dict:
     """Validate a license key against Gumroad API."""
     try:
@@ -1234,6 +1468,132 @@ class UpdateOrgRequest(BaseModel):
     slack_webhook: Optional[str] = None
     slack_channel: Optional[str] = None
     name: Optional[str] = None
+
+
+# ─── USER + ORG AUTH ─────────────────────────────────────
+
+import hashlib as _hl, hmac as _hm, base64 as _b64, json as _json
+
+def hash_password(pw):
+    salt = os.urandom(16)
+    dk = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
+    return _b64.b64encode(salt + dk).decode()
+
+def verify_password(pw, stored):
+    try:
+        raw = _b64.b64decode(stored.encode())
+        salt, dk = raw[:16], raw[16:]
+        check = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
+        return _hm.compare_digest(dk, check)
+    except Exception:
+        return False
+
+def make_token(user_id):
+    p = _json.dumps({"u": user_id, "t": datetime.now(timezone.utc).isoformat()})
+    s = _hm.new(JWT_SECRET.encode(), p.encode(), _hl.sha256).hexdigest()
+    return _b64.urlsafe_b64encode((p + "|" + s).encode()).decode()
+
+def get_user_by_token(token):
+    try:
+        conn = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        row = db_fetchone(conn,
+            "SELECT s.user_id,u.email,u.tier,u.api_key,u.org_id,u.role FROM sessions s "
+            "JOIN users u ON s.user_id=u.id WHERE s.token=? AND s.expires_at>?",
+            (token, now))
+        conn.close()
+        if row:
+            return {"user_id":row[0],"email":row[1],"tier":row[2],"api_key":row[3],"org_id":row[4],"role":row[5]}
+        return None
+    except Exception:
+        return None
+
+def get_member_by_key(api_key):
+    conn = get_db()
+    try:
+        row = db_fetchone(conn,
+            "SELECT m.id,m.org_id,m.email,m.role,o.name,o.tier,o.slack_webhook,o.slack_channel "
+            "FROM org_members m JOIN orgs o ON m.org_id=o.id WHERE m.api_key=?",
+            (api_key,))
+        if row:
+            return {"member_id":row[0],"org_id":row[1],"email":row[2],"role":row[3],
+                    "org_name":row[4],"tier":row[5],"slack_webhook":row[6],"slack_channel":row[7]}
+        return None
+    finally:
+        conn.close()
+
+def log_audit(user_email, action, resource="", detail="", user_id="", org_id="", ip=""):
+    try:
+        conn = get_db()
+        db_execute(conn, "INSERT INTO audit_log (id,user_id,user_email,org_id,action,resource,detail,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   (str(uuid.uuid4()),user_id,user_email,org_id,action,resource,str(detail)[:500],ip,datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Audit: " + str(e))
+
+
+# ─── USER + ORG AUTH ─────────────────────────────────────
+
+import hashlib as _hl, hmac as _hm, base64 as _b64, json as _json
+
+def hash_password(pw):
+    salt = os.urandom(16)
+    dk = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
+    return _b64.b64encode(salt + dk).decode()
+
+def verify_password(pw, stored):
+    try:
+        raw = _b64.b64decode(stored.encode())
+        salt, dk = raw[:16], raw[16:]
+        check = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
+        return _hm.compare_digest(dk, check)
+    except Exception:
+        return False
+
+def make_token(user_id):
+    p = _json.dumps({"u": user_id, "t": datetime.now(timezone.utc).isoformat()})
+    s = _hm.new(JWT_SECRET.encode(), p.encode(), _hl.sha256).hexdigest()
+    return _b64.urlsafe_b64encode((p + "|" + s).encode()).decode()
+
+def get_user_by_token(token):
+    try:
+        conn = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        row = db_fetchone(conn,
+            "SELECT s.user_id,u.email,u.tier,u.api_key,u.org_id,u.role FROM sessions s "
+            "JOIN users u ON s.user_id=u.id WHERE s.token=? AND s.expires_at>?",
+            (token, now))
+        conn.close()
+        if row:
+            return {"user_id":row[0],"email":row[1],"tier":row[2],"api_key":row[3],"org_id":row[4],"role":row[5]}
+        return None
+    except Exception:
+        return None
+
+def get_member_by_key(api_key):
+    conn = get_db()
+    try:
+        row = db_fetchone(conn,
+            "SELECT m.id,m.org_id,m.email,m.role,o.name,o.tier,o.slack_webhook,o.slack_channel "
+            "FROM org_members m JOIN orgs o ON m.org_id=o.id WHERE m.api_key=?",
+            (api_key,))
+        if row:
+            return {"member_id":row[0],"org_id":row[1],"email":row[2],"role":row[3],
+                    "org_name":row[4],"tier":row[5],"slack_webhook":row[6],"slack_channel":row[7]}
+        return None
+    finally:
+        conn.close()
+
+def log_audit(user_email, action, resource="", detail="", user_id="", org_id="", ip=""):
+    try:
+        conn = get_db()
+        db_execute(conn, "INSERT INTO audit_log (id,user_id,user_email,org_id,action,resource,detail,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                   (str(uuid.uuid4()),user_id,user_email,org_id,action,resource,str(detail)[:500],ip,datetime.now(timezone.utc).isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Audit: " + str(e))
 
 
 # ─── KNOWLEDGE RETRIEVAL ─────────────────────────────────
@@ -2166,6 +2526,766 @@ app.add_middleware(
 
 # ─── API ENDPOINTS ────────────────────────────────────────
 
+
+# ─── AUTH ENDPOINTS ────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = ""
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/v1/auth/signup")
+async def auth_signup(req: SignupRequest, request: Request):
+    if len(req.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    uid = str(uuid.uuid4())
+    ak = "ak-" + str(uuid.uuid4()).replace("-","")[:32]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,created_at) VALUES (?,?,?,'free',?,?)",
+                   (uid,req.email.lower().strip(),hash_password(req.password),ak,now))
+        conn.commit()
+    except Exception as e:
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise HTTPException(400,"Email already registered")
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    tok = make_token(uid)
+    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                   (str(uuid.uuid4()),uid,tok,exp,now))
+        conn.commit()
+    finally:
+        conn.close()
+    log_audit(req.email,"signup","user",uid,uid,"",(request.client.host if request.client else ""))
+    return {"token":tok,"api_key":ak,"email":req.email,"tier":"free"}
+
+@app.post("/api/v1/auth/login")
+async def auth_login(req: LoginRequest, request: Request):
+    conn = get_db()
+    try:
+        row = db_fetchone(conn,"SELECT id,email,password_hash,tier,api_key,org_id,role,active FROM users WHERE email=?",
+                         (req.email.lower().strip(),))
+    finally:
+        conn.close()
+    if not row or not row[7]:
+        raise HTTPException(401,"Invalid email or password")
+    if not verify_password(req.password,row[2]):
+        raise HTTPException(401,"Invalid email or password")
+    tok = make_token(row[0])
+    now = datetime.now(timezone.utc).isoformat()
+    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                   (str(uuid.uuid4()),row[0],tok,exp,now))
+        conn.commit()
+    finally:
+        conn.close()
+    log_audit(row[1],"login","session","",row[0],row[5] or "",(request.client.host if request.client else ""))
+    return {"token":tok,"api_key":row[4],"email":row[1],"tier":row[3],"org_id":row[5],"role":row[6]}
+
+@app.post("/api/v1/auth/logout")
+async def auth_logout(request: Request):
+    tok = request.headers.get("X-Session-Token","")
+    if tok:
+        conn = get_db()
+        try:
+            db_execute(conn,"DELETE FROM sessions WHERE token=?",(tok,))
+            conn.commit()
+        finally:
+            conn.close()
+    return {"status":"logged out"}
+
+@app.get("/api/v1/auth/me")
+async def auth_me(request: Request):
+    tok = request.headers.get("X-Session-Token","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(401,"Not authenticated")
+    user = get_user_by_token(tok)
+    if not user:
+        raise HTTPException(401,"Invalid or expired session")
+    return user
+
+@app.get("/api/v1/auth/google")
+async def google_start():
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(400,"Google OAuth not configured. Set GOOGLE_CLIENT_ID env var.")
+    from urllib.parse import urlencode
+    from fastapi.responses import RedirectResponse
+    params = {"client_id":GOOGLE_CLIENT_ID,"redirect_uri":BASE_URL+"/api/v1/auth/google/callback",
+              "response_type":"code","scope":"openid email profile","access_type":"offline"}
+    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?"+urlencode(params))
+
+@app.get("/api/v1/auth/google/callback")
+async def google_callback(code: str = None, error: str = None):
+    from fastapi.responses import RedirectResponse, HTMLResponse as _HR
+    if error or not code:
+        return RedirectResponse("/login?error=google_failed")
+    try:
+        async with httpx.AsyncClient() as client:
+            tr = await client.post("https://oauth2.googleapis.com/token",data={
+                "code":code,"client_id":GOOGLE_CLIENT_ID,"client_secret":GOOGLE_CLIENT_SECRET,
+                "redirect_uri":BASE_URL+"/api/v1/auth/google/callback","grant_type":"authorization_code"})
+            tokens = tr.json()
+            ur = await client.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization":"Bearer "+tokens.get("access_token","")})
+            gu = ur.json()
+        email = gu.get("email","")
+        gid = gu.get("id","")
+        if not email:
+            return RedirectResponse("/login?error=no_email")
+        conn = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            row = db_fetchone(conn,"SELECT id,api_key,tier FROM users WHERE email=?",(email,))
+            if row:
+                uid,ak,tier = row[0],row[1],row[2]
+                db_execute(conn,"UPDATE users SET google_id=? WHERE id=?",(gid,uid))
+            else:
+                uid = str(uuid.uuid4())
+                ak = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+                db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,google_id,created_at) VALUES (?,?,?,'free',?,?,?)",
+                           (uid,email,"",ak,gid,now))
+                tier = "free"
+            stok = make_token(uid)
+            exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+            db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                       (str(uuid.uuid4()),uid,stok,exp,now))
+            conn.commit()
+        finally:
+            conn.close()
+        log_audit(email,"google_login","session",gid,uid,"")
+        return _HR(
+            "<script>"
+            "localStorage.setItem('apex_token','" + stok + "');"
+            "localStorage.setItem('apex_key','" + ak + "');"
+            "localStorage.setItem('apex_email','" + email + "');"
+            "window.location.href='/dashboard';</script>"
+        )
+    except Exception as e:
+        logger.error("Google OAuth: "+str(e))
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login?error=oauth_error")
+
+# ─── BILLING ────────────────────────────────────────────
+
+@app.post("/api/v1/billing/checkout")
+async def billing_checkout(request: Request):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(400,"Stripe not configured. Add STRIPE_SECRET_KEY to env vars.")
+    data = await request.json()
+    tier = data.get("tier","starter")
+    tok = request.headers.get("X-Session-Token","")
+    user = get_user_by_token(tok)
+    if not user:
+        raise HTTPException(401,"Not authenticated")
+    pm = {"starter":STRIPE_STARTER_PRICE,"pro":STRIPE_PRO_PRICE,"enterprise":STRIPE_ENTERPRISE_PRICE}
+    pid = pm.get(tier)
+    if not pid:
+        raise HTTPException(400,"Invalid tier")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post("https://api.stripe.com/v1/checkout/sessions",
+                auth=(STRIPE_SECRET_KEY,""),
+                data={"mode":"subscription","line_items[0][price]":pid,"line_items[0][quantity]":"1",
+                      "customer_email":user["email"],
+                      "success_url":BASE_URL+"/dashboard?upgraded=1",
+                      "cancel_url":BASE_URL+"/pricing",
+                      "metadata[user_id]":user["user_id"],"metadata[tier]":tier})
+            res = r.json()
+            return {"checkout_url":res.get("url"),"session_id":res.get("id")}
+    except Exception as e:
+        raise HTTPException(500,str(e))
+
+@app.post("/api/v1/billing/webhook")
+async def billing_webhook(request: Request):
+    try:
+        payload = await request.body()
+        event = _json.loads(payload)
+        etype = event.get("type","")
+        if etype in ("checkout.session.completed","customer.subscription.updated"):
+            obj = event.get("data",{}).get("object",{})
+            uid = obj.get("metadata",{}).get("user_id","")
+            tier = obj.get("metadata",{}).get("tier","starter")
+            cid = obj.get("customer","")
+            sid = obj.get("subscription",obj.get("id",""))
+            if uid:
+                conn = get_db()
+                try:
+                    db_execute(conn,"UPDATE users SET tier=?,stripe_customer_id=?,stripe_subscription_id=? WHERE id=?",(tier,cid,sid,uid))
+                    conn.commit()
+                finally:
+                    conn.close()
+    except Exception as e:
+        logger.error("Stripe webhook: "+str(e))
+    return {"received":True}
+
+@app.get("/api/v1/billing/status")
+async def billing_status(request: Request):
+    tok = request.headers.get("X-Session-Token","")
+    user = get_user_by_token(tok)
+    tier = user["tier"] if user else "free"
+    limits = TIER_LIMITS.get(tier,{})
+    return {"tier":tier,"limits":limits}
+
+# ─── AUDIT LOG ──────────────────────────────────────────
+
+@app.get("/api/v1/audit/logs")
+async def get_audit_logs(request: Request, limit: int=100, offset: int=0):
+    conn = get_db()
+    try:
+        rows = db_fetchall(conn,
+            "SELECT id,user_email,org_id,action,resource,detail,ip,created_at FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit,offset))
+        total = db_fetchone(conn,"SELECT COUNT(*) FROM audit_log",())[0]
+    finally:
+        conn.close()
+    return {"logs":[{"id":r[0],"user":r[1],"org_id":r[2],"action":r[3],"resource":r[4],"detail":r[5],"ip":r[6],"ts":r[7]} for r in rows],"total":total}
+
+# ─── ORG MANAGEMENT ─────────────────────────────────────
+
+class CreateOrgRequest(BaseModel):
+    name: str
+    slug: str
+    owner_email: str
+    slack_webhook: Optional[str] = ""
+    slack_channel: Optional[str] = ""
+
+class InviteMemberRequest(BaseModel):
+    email: str
+    role: str = "member"
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    email: str
+
+@app.post("/api/v1/orgs")
+async def create_org(req: CreateOrgRequest, api_key: str = Depends(get_api_key)):
+    import re as _re
+    slug = _re.sub(r'[^a-z0-9-]','-',req.slug.lower()).strip('-')
+    oid = str(uuid.uuid4())
+    mid = str(uuid.uuid4())
+    mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO orgs (id,name,slug,tier,owner_email,slack_webhook,slack_channel,created_at) VALUES (?,?,?,'enterprise',?,?,?,?)",
+                   (oid,req.name,slug,req.owner_email,req.slack_webhook or "",req.slack_channel or "",now))
+        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,'owner',?,?,?)",
+                   (mid,oid,req.owner_email,mk,now,now))
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    return {"org_id":oid,"slug":slug,"owner_api_key":mk,"message":"Organization created"}
+
+@app.post("/api/v1/orgs/{org_id}/invite")
+async def invite_member(org_id: str, req: InviteMemberRequest, api_key: str = Depends(get_api_key)):
+    tok = str(uuid.uuid4()).replace("-","")
+    iid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    exp = datetime.fromtimestamp(now.timestamp()+7*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO org_invites (id,org_id,email,role,token,created_by,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                   (iid,org_id,req.email,req.role,tok,api_key,exp,now.isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"invite_url":BASE_URL+"/accept-invite?token="+tok,"token":tok,"email":req.email,"expires_at":exp}
+
+@app.post("/api/v1/orgs/accept-invite")
+async def accept_invite(req: AcceptInviteRequest):
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        inv = db_fetchone(conn,"SELECT id,org_id,email,role,expires_at,used FROM org_invites WHERE token=?",(req.token,))
+        if not inv:
+            raise HTTPException(404,"Invite not found")
+        if inv[5]:
+            raise HTTPException(400,"Invite already used")
+        if inv[4] < now:
+            raise HTTPException(400,"Invite expired")
+        mid = str(uuid.uuid4())
+        mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,?,?,?,?)",
+                   (mid,inv[1],req.email,inv[3],mk,now,now))
+        db_execute(conn,"UPDATE org_invites SET used=1 WHERE id=?",(inv[0],))
+        conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    return {"api_key":mk,"org_id":inv[1],"role":inv[3],"message":"Welcome to the team!"}
+
+@app.get("/api/v1/orgs/{org_id}")
+async def get_org(org_id: str, api_key: str = Depends(get_api_key)):
+    conn = get_db()
+    try:
+        org = db_fetchone(conn,"SELECT id,name,slug,tier,owner_email,slack_webhook,slack_channel FROM orgs WHERE id=?",(org_id,))
+        members = db_fetchall(conn,"SELECT id,email,role,api_key,joined_at FROM org_members WHERE org_id=?",(org_id,))
+    finally:
+        conn.close()
+    if not org:
+        raise HTTPException(404,"Org not found")
+    return {"org":{"id":org[0],"name":org[1],"slug":org[2],"tier":org[3]},
+            "members":[{"id":m[0],"email":m[1],"role":m[2],"api_key":m[3][:8]+"...","joined_at":m[4]} for m in members]}
+
+# ─── SLACK CONFIG ────────────────────────────────────────
+
+@app.post("/api/v1/slack/configure")
+async def configure_slack(request: Request, api_key: str = Depends(get_api_key)):
+    data = await request.json()
+    webhook = data.get("webhook_url","")
+    channel = data.get("channel","#ai-workforce")
+    member = get_member_by_key(api_key)
+    if member:
+        conn = get_db()
+        try:
+            db_execute(conn,"UPDATE orgs SET slack_webhook=?,slack_channel=? WHERE id=?",(webhook,channel,member["org_id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status":"configured","scope":"org"}
+    return {"status":"configured","scope":"global"}
+
+@app.post("/api/v1/slack/test")
+async def test_slack(request: Request):
+    data = await request.json()
+    webhook = data.get("webhook_url") or SLACK_WEBHOOK_URL
+    if not webhook:
+        raise HTTPException(400,"No Slack webhook configured")
+    ok = await send_slack_message("APEX SWARM connected to Slack! Your AI workforce is ready.",webhook_url=webhook)
+    return {"success":ok}
+
+@app.post("/api/v1/slack/commands")
+async def slack_commands(request: Request):
+    form = await request.form()
+    text = (form.get("text") or "").strip()
+    user_name = form.get("user_name","unknown")
+    response_url = form.get("response_url","")
+    parts = text.split(None,2)
+    action = parts[0].lower() if parts else "help"
+    async def respond(msg):
+        if response_url:
+            try:
+                async with httpx.AsyncClient(timeout=5) as c:
+                    await c.post(response_url,json={"text":msg,"response_type":"in_channel"})
+            except Exception:
+                pass
+    if action == "deploy" and len(parts) >= 3:
+        agent_type = parts[1]
+        task = parts[2]
+        asyncio.create_task(respond("Deploying " + agent_type + " for: " + task))
+        try:
+            result = await execute_task(agent_type,task,"slack-"+user_name)
+            await respond(agent_type + " result: " + (result or "")[:500])
+        except Exception as e:
+            await respond("Error: "+str(e))
+        return {"response_type":"in_channel","text":"Processing..."}
+    elif action == "status":
+        running = [d for d in active_daemons.values() if d.get("status")=="running"]
+        return {"response_type":"in_channel","text":"APEX SWARM: "+str(len(running))+" workers active"}
+    elif action == "stop" and len(parts) >= 2:
+        did = parts[1]
+        if did in active_daemons:
+            active_daemons[did]["status"] = "stopped"
+            return {"response_type":"in_channel","text":"Stopped "+did[:8]}
+        return {"response_type":"in_channel","text":"Worker not found"}
+    return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
+
+
+# ─── AUTH ENDPOINTS ────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = ""
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/v1/auth/signup")
+async def auth_signup(req: SignupRequest, request: Request):
+    if len(req.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    uid = str(uuid.uuid4())
+    ak = "ak-" + str(uuid.uuid4()).replace("-","")[:32]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,created_at) VALUES (?,?,?,'free',?,?)",
+                   (uid,req.email.lower().strip(),hash_password(req.password),ak,now))
+        conn.commit()
+    except Exception as e:
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise HTTPException(400,"Email already registered")
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    tok = make_token(uid)
+    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                   (str(uuid.uuid4()),uid,tok,exp,now))
+        conn.commit()
+    finally:
+        conn.close()
+    log_audit(req.email,"signup","user",uid,uid,"",(request.client.host if request.client else ""))
+    return {"token":tok,"api_key":ak,"email":req.email,"tier":"free"}
+
+@app.post("/api/v1/auth/login")
+async def auth_login(req: LoginRequest, request: Request):
+    conn = get_db()
+    try:
+        row = db_fetchone(conn,"SELECT id,email,password_hash,tier,api_key,org_id,role,active FROM users WHERE email=?",
+                         (req.email.lower().strip(),))
+    finally:
+        conn.close()
+    if not row or not row[7]:
+        raise HTTPException(401,"Invalid email or password")
+    if not verify_password(req.password,row[2]):
+        raise HTTPException(401,"Invalid email or password")
+    tok = make_token(row[0])
+    now = datetime.now(timezone.utc).isoformat()
+    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                   (str(uuid.uuid4()),row[0],tok,exp,now))
+        conn.commit()
+    finally:
+        conn.close()
+    log_audit(row[1],"login","session","",row[0],row[5] or "",(request.client.host if request.client else ""))
+    return {"token":tok,"api_key":row[4],"email":row[1],"tier":row[3],"org_id":row[5],"role":row[6]}
+
+@app.post("/api/v1/auth/logout")
+async def auth_logout(request: Request):
+    tok = request.headers.get("X-Session-Token","")
+    if tok:
+        conn = get_db()
+        try:
+            db_execute(conn,"DELETE FROM sessions WHERE token=?",(tok,))
+            conn.commit()
+        finally:
+            conn.close()
+    return {"status":"logged out"}
+
+@app.get("/api/v1/auth/me")
+async def auth_me(request: Request):
+    tok = request.headers.get("X-Session-Token","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(401,"Not authenticated")
+    user = get_user_by_token(tok)
+    if not user:
+        raise HTTPException(401,"Invalid or expired session")
+    return user
+
+@app.get("/api/v1/auth/google")
+async def google_start():
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(400,"Google OAuth not configured. Set GOOGLE_CLIENT_ID env var.")
+    from urllib.parse import urlencode
+    from fastapi.responses import RedirectResponse
+    params = {"client_id":GOOGLE_CLIENT_ID,"redirect_uri":BASE_URL+"/api/v1/auth/google/callback",
+              "response_type":"code","scope":"openid email profile","access_type":"offline"}
+    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?"+urlencode(params))
+
+@app.get("/api/v1/auth/google/callback")
+async def google_callback(code: str = None, error: str = None):
+    from fastapi.responses import RedirectResponse, HTMLResponse as _HR
+    if error or not code:
+        return RedirectResponse("/login?error=google_failed")
+    try:
+        async with httpx.AsyncClient() as client:
+            tr = await client.post("https://oauth2.googleapis.com/token",data={
+                "code":code,"client_id":GOOGLE_CLIENT_ID,"client_secret":GOOGLE_CLIENT_SECRET,
+                "redirect_uri":BASE_URL+"/api/v1/auth/google/callback","grant_type":"authorization_code"})
+            tokens = tr.json()
+            ur = await client.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization":"Bearer "+tokens.get("access_token","")})
+            gu = ur.json()
+        email = gu.get("email","")
+        gid = gu.get("id","")
+        if not email:
+            return RedirectResponse("/login?error=no_email")
+        conn = get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            row = db_fetchone(conn,"SELECT id,api_key,tier FROM users WHERE email=?",(email,))
+            if row:
+                uid,ak,tier = row[0],row[1],row[2]
+                db_execute(conn,"UPDATE users SET google_id=? WHERE id=?",(gid,uid))
+            else:
+                uid = str(uuid.uuid4())
+                ak = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+                db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,google_id,created_at) VALUES (?,?,?,'free',?,?,?)",
+                           (uid,email,"",ak,gid,now))
+                tier = "free"
+            stok = make_token(uid)
+            exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
+            db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
+                       (str(uuid.uuid4()),uid,stok,exp,now))
+            conn.commit()
+        finally:
+            conn.close()
+        log_audit(email,"google_login","session",gid,uid,"")
+        return _HR(
+            "<script>"
+            "localStorage.setItem('apex_token','" + stok + "');"
+            "localStorage.setItem('apex_key','" + ak + "');"
+            "localStorage.setItem('apex_email','" + email + "');"
+            "window.location.href='/dashboard';</script>"
+        )
+    except Exception as e:
+        logger.error("Google OAuth: "+str(e))
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login?error=oauth_error")
+
+# ─── BILLING ────────────────────────────────────────────
+
+@app.post("/api/v1/billing/checkout")
+async def billing_checkout(request: Request):
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(400,"Stripe not configured. Add STRIPE_SECRET_KEY to env vars.")
+    data = await request.json()
+    tier = data.get("tier","starter")
+    tok = request.headers.get("X-Session-Token","")
+    user = get_user_by_token(tok)
+    if not user:
+        raise HTTPException(401,"Not authenticated")
+    pm = {"starter":STRIPE_STARTER_PRICE,"pro":STRIPE_PRO_PRICE,"enterprise":STRIPE_ENTERPRISE_PRICE}
+    pid = pm.get(tier)
+    if not pid:
+        raise HTTPException(400,"Invalid tier")
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post("https://api.stripe.com/v1/checkout/sessions",
+                auth=(STRIPE_SECRET_KEY,""),
+                data={"mode":"subscription","line_items[0][price]":pid,"line_items[0][quantity]":"1",
+                      "customer_email":user["email"],
+                      "success_url":BASE_URL+"/dashboard?upgraded=1",
+                      "cancel_url":BASE_URL+"/pricing",
+                      "metadata[user_id]":user["user_id"],"metadata[tier]":tier})
+            res = r.json()
+            return {"checkout_url":res.get("url"),"session_id":res.get("id")}
+    except Exception as e:
+        raise HTTPException(500,str(e))
+
+@app.post("/api/v1/billing/webhook")
+async def billing_webhook(request: Request):
+    try:
+        payload = await request.body()
+        event = _json.loads(payload)
+        etype = event.get("type","")
+        if etype in ("checkout.session.completed","customer.subscription.updated"):
+            obj = event.get("data",{}).get("object",{})
+            uid = obj.get("metadata",{}).get("user_id","")
+            tier = obj.get("metadata",{}).get("tier","starter")
+            cid = obj.get("customer","")
+            sid = obj.get("subscription",obj.get("id",""))
+            if uid:
+                conn = get_db()
+                try:
+                    db_execute(conn,"UPDATE users SET tier=?,stripe_customer_id=?,stripe_subscription_id=? WHERE id=?",(tier,cid,sid,uid))
+                    conn.commit()
+                finally:
+                    conn.close()
+    except Exception as e:
+        logger.error("Stripe webhook: "+str(e))
+    return {"received":True}
+
+@app.get("/api/v1/billing/status")
+async def billing_status(request: Request):
+    tok = request.headers.get("X-Session-Token","")
+    user = get_user_by_token(tok)
+    tier = user["tier"] if user else "free"
+    limits = TIER_LIMITS.get(tier,{})
+    return {"tier":tier,"limits":limits}
+
+# ─── AUDIT LOG ──────────────────────────────────────────
+
+@app.get("/api/v1/audit/logs")
+async def get_audit_logs(request: Request, limit: int=100, offset: int=0):
+    conn = get_db()
+    try:
+        rows = db_fetchall(conn,
+            "SELECT id,user_email,org_id,action,resource,detail,ip,created_at FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit,offset))
+        total = db_fetchone(conn,"SELECT COUNT(*) FROM audit_log",())[0]
+    finally:
+        conn.close()
+    return {"logs":[{"id":r[0],"user":r[1],"org_id":r[2],"action":r[3],"resource":r[4],"detail":r[5],"ip":r[6],"ts":r[7]} for r in rows],"total":total}
+
+# ─── ORG MANAGEMENT ─────────────────────────────────────
+
+class CreateOrgRequest(BaseModel):
+    name: str
+    slug: str
+    owner_email: str
+    slack_webhook: Optional[str] = ""
+    slack_channel: Optional[str] = ""
+
+class InviteMemberRequest(BaseModel):
+    email: str
+    role: str = "member"
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    email: str
+
+@app.post("/api/v1/orgs")
+async def create_org(req: CreateOrgRequest, api_key: str = Depends(get_api_key)):
+    import re as _re
+    slug = _re.sub(r'[^a-z0-9-]','-',req.slug.lower()).strip('-')
+    oid = str(uuid.uuid4())
+    mid = str(uuid.uuid4())
+    mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO orgs (id,name,slug,tier,owner_email,slack_webhook,slack_channel,created_at) VALUES (?,?,?,'enterprise',?,?,?,?)",
+                   (oid,req.name,slug,req.owner_email,req.slack_webhook or "",req.slack_channel or "",now))
+        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,'owner',?,?,?)",
+                   (mid,oid,req.owner_email,mk,now,now))
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    return {"org_id":oid,"slug":slug,"owner_api_key":mk,"message":"Organization created"}
+
+@app.post("/api/v1/orgs/{org_id}/invite")
+async def invite_member(org_id: str, req: InviteMemberRequest, api_key: str = Depends(get_api_key)):
+    tok = str(uuid.uuid4()).replace("-","")
+    iid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    exp = datetime.fromtimestamp(now.timestamp()+7*86400,tz=timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        db_execute(conn,"INSERT INTO org_invites (id,org_id,email,role,token,created_by,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                   (iid,org_id,req.email,req.role,tok,api_key,exp,now.isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"invite_url":BASE_URL+"/accept-invite?token="+tok,"token":tok,"email":req.email,"expires_at":exp}
+
+@app.post("/api/v1/orgs/accept-invite")
+async def accept_invite(req: AcceptInviteRequest):
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        inv = db_fetchone(conn,"SELECT id,org_id,email,role,expires_at,used FROM org_invites WHERE token=?",(req.token,))
+        if not inv:
+            raise HTTPException(404,"Invite not found")
+        if inv[5]:
+            raise HTTPException(400,"Invite already used")
+        if inv[4] < now:
+            raise HTTPException(400,"Invite expired")
+        mid = str(uuid.uuid4())
+        mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
+        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,?,?,?,?)",
+                   (mid,inv[1],req.email,inv[3],mk,now,now))
+        db_execute(conn,"UPDATE org_invites SET used=1 WHERE id=?",(inv[0],))
+        conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400,str(e))
+    finally:
+        conn.close()
+    return {"api_key":mk,"org_id":inv[1],"role":inv[3],"message":"Welcome to the team!"}
+
+@app.get("/api/v1/orgs/{org_id}")
+async def get_org(org_id: str, api_key: str = Depends(get_api_key)):
+    conn = get_db()
+    try:
+        org = db_fetchone(conn,"SELECT id,name,slug,tier,owner_email,slack_webhook,slack_channel FROM orgs WHERE id=?",(org_id,))
+        members = db_fetchall(conn,"SELECT id,email,role,api_key,joined_at FROM org_members WHERE org_id=?",(org_id,))
+    finally:
+        conn.close()
+    if not org:
+        raise HTTPException(404,"Org not found")
+    return {"org":{"id":org[0],"name":org[1],"slug":org[2],"tier":org[3]},
+            "members":[{"id":m[0],"email":m[1],"role":m[2],"api_key":m[3][:8]+"...","joined_at":m[4]} for m in members]}
+
+# ─── SLACK CONFIG ────────────────────────────────────────
+
+@app.post("/api/v1/slack/configure")
+async def configure_slack(request: Request, api_key: str = Depends(get_api_key)):
+    data = await request.json()
+    webhook = data.get("webhook_url","")
+    channel = data.get("channel","#ai-workforce")
+    member = get_member_by_key(api_key)
+    if member:
+        conn = get_db()
+        try:
+            db_execute(conn,"UPDATE orgs SET slack_webhook=?,slack_channel=? WHERE id=?",(webhook,channel,member["org_id"]))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status":"configured","scope":"org"}
+    return {"status":"configured","scope":"global"}
+
+@app.post("/api/v1/slack/test")
+async def test_slack(request: Request):
+    data = await request.json()
+    webhook = data.get("webhook_url") or SLACK_WEBHOOK_URL
+    if not webhook:
+        raise HTTPException(400,"No Slack webhook configured")
+    ok = await send_slack_message("APEX SWARM connected to Slack! Your AI workforce is ready.",webhook_url=webhook)
+    return {"success":ok}
+
+@app.post("/api/v1/slack/commands")
+async def slack_commands(request: Request):
+    form = await request.form()
+    text = (form.get("text") or "").strip()
+    user_name = form.get("user_name","unknown")
+    response_url = form.get("response_url","")
+    parts = text.split(None,2)
+    action = parts[0].lower() if parts else "help"
+    async def respond(msg):
+        if response_url:
+            try:
+                async with httpx.AsyncClient(timeout=5) as c:
+                    await c.post(response_url,json={"text":msg,"response_type":"in_channel"})
+            except Exception:
+                pass
+    if action == "deploy" and len(parts) >= 3:
+        agent_type = parts[1]
+        task = parts[2]
+        asyncio.create_task(respond("Deploying " + agent_type + " for: " + task))
+        try:
+            result = await execute_task(agent_type,task,"slack-"+user_name)
+            await respond(agent_type + " result: " + (result or "")[:500])
+        except Exception as e:
+            await respond("Error: "+str(e))
+        return {"response_type":"in_channel","text":"Processing..."}
+    elif action == "status":
+        running = [d for d in active_daemons.values() if d.get("status")=="running"]
+        return {"response_type":"in_channel","text":"APEX SWARM: "+str(len(running))+" workers active"}
+    elif action == "stop" and len(parts) >= 2:
+        did = parts[1]
+        if did in active_daemons:
+            active_daemons[did]["status"] = "stopped"
+            return {"response_type":"in_channel","text":"Stopped "+did[:8]}
+        return {"response_type":"in_channel","text":"Worker not found"}
+    return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
+
 @app.get("/api/v1/health")
 async def health():
     return {
@@ -2402,6 +3522,34 @@ async def list_daemons():
         return {"daemons": [], "message": "Mission Control not loaded"}
     return {"daemons": daemon_manager.get_daemons()}
 
+
+@app.get("/api/v1/admin/users")
+async def admin_list_users(current_user: dict = Depends(get_validated_user)):
+    if current_user.get("email") not in ["revcole@gmail.com", "admin@swarmsfall.com"] and current_user.get("tier") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, email, tier, active, created_at FROM users ORDER BY created_at DESC").fetchall()
+    return {"users": [{"id":r[0],"email":r[1],"tier":r[2],"active":r[3],"created_at":r[4]} for r in rows]}
+
+@app.post("/api/v1/admin/users/{user_id}/tier")
+async def admin_set_tier(user_id: str, request: Request, current_user: dict = Depends(get_validated_user)):
+    if current_user.get("email") not in ["revcole@gmail.com", "admin@swarmsfall.com"] and current_user.get("tier") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = await request.json()
+    tier = body.get("tier", "free")
+    with get_db() as conn:
+        conn.execute("UPDATE users SET tier=? WHERE id=?", (tier, user_id))
+        conn.commit()
+    return {"ok": True, "tier": tier}
+
+@app.post("/api/v1/admin/users/{user_id}/suspend")
+async def admin_suspend_user(user_id: str, current_user: dict = Depends(get_validated_user)):
+    if current_user.get("email") not in ["revcole@gmail.com", "admin@swarmsfall.com"] and current_user.get("tier") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    with get_db() as conn:
+        conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
+        conn.commit()
+    return {"ok": True}
 
 @app.get("/api/v1/daemons/presets")
 async def list_daemon_presets():
@@ -3794,16 +4942,503 @@ async def list_channels():
 
 # ─── PREMIUM DASHBOARD ───────────────────────────────────
 
+
+
+# ─── STATIC HTML PAGES ───────────────────────────────────
+SIGNUP_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Sign Up — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\nh1{font-size:26px;font-weight:800;margin-bottom:6px}\n.sub{color:#888;font-size:14px;margin-bottom:28px}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{display:block;width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s;text-align:center;text-decoration:none;margin-bottom:12px}\n.btn:hover{opacity:0.9}\n.btn.outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0;display:flex;align-items:center;justify-content:center;gap:10px}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.link{text-align:center;margin-top:16px;font-size:13px;color:#888}\n.link a{color:#00f0a0;text-decoration:none}\n.divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#555;font-size:12px}\n.divider:before,.divider:after{content:\'\';flex:1;height:1px;background:rgba(255,255,255,0.08)}\n.features{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}\n.feat{font-size:12px;color:#aaa;display:flex;align-items:center;gap:5px}\n.feat span{color:#00f0a0}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <h1>Start your AI workforce</h1>\n  <p class="sub">Deploy 66+ autonomous AI agents in 60 seconds</p>\n  <div class="features">\n    <div class="feat"><span>✓</span> Free to start</div>\n    <div class="feat"><span>✓</span> No credit card</div>\n    <div class="feat"><span>✓</span> 24/7 workers</div>\n  </div>\n  <a href="/api/v1/auth/google" class="btn outline">\n    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.3z"/></svg>\n    Continue with Google\n  </a>\n  <div class="divider">or</div>\n  <div class="err" id="err"></div>\n  <label>Email</label>\n  <input type="email" id="email" placeholder="you@company.com" autofocus>\n  <label>Password</label>\n  <input type="password" id="password" placeholder="At least 8 characters">\n  <button class="btn" onclick="doSignup()">Create Free Account</button>\n  <div class="link">Already have an account? <a href="/login">Sign in</a> · <a href="/pricing">See pricing</a></div>\n</div>\n<script>\nasync function doSignup() {\n  const email = document.getElementById(\'email\').value.trim();\n  const password = document.getElementById(\'password\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  if (!email || !password) { err.textContent = \'Please fill in all fields\'; err.style.display = \'block\'; return; }\n  try {\n    const r = await fetch(\'/api/v1/auth/signup\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n      body: JSON.stringify({email, password})\n    });\n    const data = await r.json();\n    if (!r.ok) { err.textContent = data.detail || \'Signup failed\'; err.style.display = \'block\'; return; }\n    localStorage.setItem(\'apex_token\', data.token);\n    localStorage.setItem(\'apex_key\', data.api_key);\n    localStorage.setItem(\'apex_email\', data.email);\n    window.location.href = \'/dashboard\';\n  } catch(e) { err.textContent = \'Network error — please try again\'; err.style.display = \'block\'; }\n}\ndocument.addEventListener(\'keydown\', e => { if(e.key === \'Enter\') doSignup(); });\n</script>\n</body></html>\n'
+LOGIN_HTML_NEW = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Sign In — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\nh1{font-size:26px;font-weight:800;margin-bottom:6px}\n.sub{color:#888;font-size:14px;margin-bottom:28px}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{display:block;width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s;text-align:center;text-decoration:none;margin-bottom:12px}\n.btn:hover{opacity:0.9}\n.btn.outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0;display:flex;align-items:center;justify-content:center;gap:10px}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.link{text-align:center;margin-top:16px;font-size:13px;color:#888}\n.link a{color:#00f0a0;text-decoration:none}\n.divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#555;font-size:12px}\n.divider:before,.divider:after{content:\'\';flex:1;height:1px;background:rgba(255,255,255,0.08)}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <h1>Welcome back</h1>\n  <p class="sub">Sign in to your AI workforce</p>\n  <a href="/api/v1/auth/google" class="btn outline">\n    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.3z"/></svg>\n    Continue with Google\n  </a>\n  <div class="divider">or</div>\n  <div class="err" id="err"></div>\n  <label>Email</label>\n  <input type="email" id="email" placeholder="you@company.com" autofocus>\n  <label>Password</label>\n  <input type="password" id="password" placeholder="Your password">\n  <button class="btn" onclick="doLogin()">Sign In</button>\n  <div class="link">No account? <a href="/signup">Sign up free</a> · <a href="/pricing">Pricing</a></div>\n</div>\n<script>\nconst params = new URLSearchParams(window.location.search);\nif (params.get(\'error\')) {\n  const err = document.getElementById(\'err\');\n  err.textContent = \'Google sign-in failed. Please try email/password or try again.\';\n  err.style.display = \'block\';\n}\nasync function doLogin() {\n  const email = document.getElementById(\'email\').value.trim();\n  const password = document.getElementById(\'password\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  try {\n    const r = await fetch(\'/api/v1/auth/login\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n      body: JSON.stringify({email, password})\n    });\n    const data = await r.json();\n    if (!r.ok) { err.textContent = data.detail || \'Login failed\'; err.style.display = \'block\'; return; }\n    localStorage.setItem(\'apex_token\', data.token);\n    localStorage.setItem(\'apex_key\', data.api_key);\n    localStorage.setItem(\'apex_email\', data.email);\n    window.location.href = \'/dashboard\';\n  } catch(e) { err.textContent = \'Network error — please try again\'; err.style.display = \'block\'; }\n}\ndocument.addEventListener(\'keydown\', e => { if(e.key === \'Enter\') doLogin(); });\n</script>\n</body></html>\n'
+PRICING_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Pricing — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;padding:0 20px 80px}\nnav{display:flex;justify-content:space-between;align-items:center;padding:20px 0;max-width:1000px;margin:0 auto 48px;border-bottom:1px solid rgba(255,255,255,0.06)}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0}\nnav a{color:#888;text-decoration:none;font-size:14px;margin-left:20px}\nnav a:hover{color:#e8e8f0}\n.nav-cta{background:#00f0a0;color:#0a0a0f;padding:8px 18px;border-radius:8px;font-weight:700}\n.hero{text-align:center;max-width:1000px;margin:0 auto 60px}\n.badge{display:inline-block;background:rgba(0,240,160,0.1);border:1px solid rgba(0,240,160,0.2);color:#00f0a0;font-size:11px;padding:5px 14px;border-radius:20px;margin-bottom:16px;font-family:\'IBM Plex Mono\',monospace;letter-spacing:1px}\nh1{font-size:48px;font-weight:800;margin-bottom:14px;line-height:1.1}\n.sub{color:#888;font-size:18px;max-width:540px;margin:0 auto}\n.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1000px;margin:0 auto 32px}\n@media(max-width:700px){.grid{grid-template-columns:1fr}}\n.tier{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px;position:relative;transition:border-color 0.2s}\n.tier:hover{border-color:rgba(255,255,255,0.15)}\n.tier.featured{border-color:#00f0a0;background:rgba(0,240,160,0.03)}\n.tier-badge{position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:#00f0a0;color:#0a0a0f;font-size:10px;font-weight:700;padding:4px 14px;border-radius:20px;letter-spacing:1.5px;white-space:nowrap}\n.tier-name{font-size:20px;font-weight:700;margin-bottom:6px}\n.price{font-size:48px;font-weight:800;color:#00f0a0;line-height:1;margin:12px 0 4px}\n.price span{font-size:16px;color:#666;font-weight:400}\n.desc{color:#888;font-size:13px;margin-bottom:24px}\nul{list-style:none;margin-bottom:28px}\nli{padding:8px 0;font-size:14px;color:#aaa;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px}\nli:last-child{border:none}\nli:before{content:"✓";color:#00f0a0;font-weight:700;flex-shrink:0}\n.btn{display:block;width:100%;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:hover{opacity:0.9}\n.btn-mint{background:#00f0a0;color:#0a0a0f}\n.btn-outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0}\n.enterprise-bar{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px 40px;max-width:1000px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px}\n.faq{max-width:700px;margin:48px auto 0}\n.faq h2{font-size:28px;font-weight:800;margin-bottom:24px;text-align:center}\n.q{margin-bottom:20px;padding:20px;background:#13131a;border-radius:10px;border:1px solid rgba(255,255,255,0.06)}\n.q strong{display:block;margin-bottom:8px;font-size:15px}\n.q p{color:#888;font-size:14px;line-height:1.6}\n</style>\n</head>\n<body>\n<nav>\n  <div class="logo">APEX SWARM</div>\n  <div>\n    <a href="/demo">Live Demo</a>\n    <a href="/login">Sign In</a>\n    <a href="/signup" class="nav-cta">Get Started</a>\n  </div>\n</nav>\n<div class="hero">\n  <div class="badge">PRICING</div>\n  <h1>Your AI workforce.<br>Pay as you grow.</h1>\n  <p class="sub">Start free. Upgrade when your AI agents need to work harder.</p>\n</div>\n<div class="grid">\n  <div class="tier">\n    <div class="tier-name">Starter</div>\n    <div class="price">$49<span>/mo</span></div>\n    <div class="desc">For individuals and small teams</div>\n    <ul>\n      <li>25 agent runs per day</li>\n      <li>1 background worker (daemon)</li>\n      <li>3 scheduled tasks</li>\n      <li>Telegram alerts</li>\n      <li>All 66+ agent types</li>\n      <li>API access</li>\n    </ul>\n    <a href="/signup" class="btn btn-outline">Get Started</a>\n  </div>\n  <div class="tier featured">\n    <div class="tier-badge">MOST POPULAR</div>\n    <div class="tier-name">Pro</div>\n    <div class="price">$199<span>/mo</span></div>\n    <div class="desc">For growing teams that need more</div>\n    <ul>\n      <li>100 agent runs per day</li>\n      <li>5 background workers</li>\n      <li>10 scheduled tasks</li>\n      <li>Telegram + Slack alerts</li>\n      <li>Team access (5 seats)</li>\n      <li>Priority execution queue</li>\n      <li>Workflow automation</li>\n    </ul>\n    <a href="/signup" class="btn btn-mint">Start Free Trial</a>\n  </div>\n  <div class="tier">\n    <div class="tier-name">Enterprise</div>\n    <div class="price">$999<span>/mo</span></div>\n    <div class="desc">Unlimited AI workforce at scale</div>\n    <ul>\n      <li>Unlimited agent runs</li>\n      <li>50 background workers</li>\n      <li>Unlimited scheduled tasks</li>\n      <li>All output channels</li>\n      <li>Unlimited team seats</li>\n      <li>Audit logs + SSO</li>\n      <li>Dedicated support SLA</li>\n      <li>Custom agent training</li>\n    </ul>\n    <a href="mailto:sales@apexswarm.ai" class="btn btn-outline">Contact Sales</a>\n  </div>\n</div>\n<div class="enterprise-bar">\n  <div>\n    <div style="font-size:20px;font-weight:700;margin-bottom:6px">Need a custom plan?</div>\n    <div style="color:#888;font-size:14px">White-label, on-premise, custom agents, or volume pricing available.</div>\n  </div>\n  <a href="mailto:sales@apexswarm.ai" class="btn btn-mint" style="width:auto;padding:14px 32px">Talk to Sales</a>\n</div>\n<div class="faq">\n  <h2>Common questions</h2>\n  <div class="q"><strong>What\'s an agent run?</strong><p>Each time you deploy an agent to complete a task, that counts as one run. Background workers (daemons) use runs each time they cycle.</p></div>\n  <div class="q"><strong>What\'s a background worker?</strong><p>A daemon — an AI agent that runs continuously on a schedule, monitoring for conditions and firing alerts to Telegram or Slack when they\'re met.</p></div>\n  <div class="q"><strong>Can I cancel anytime?</strong><p>Yes. Cancel from your dashboard at any time. You keep access until the end of your billing period.</p></div>\n  <div class="q"><strong>Do you offer a free trial?</strong><p>Free accounts can run up to 5 agents per day. Upgrade anytime. No credit card required to start.</p></div>\n</div>\n</body></html>\n'
+DEMO_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Live Demo — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\n:root{--bg:#0a0a0f;--bg2:#13131a;--mint:#00f0a0;--text:#e8e8f0;--text2:#aaa;--text3:#555;--border:rgba(255,255,255,0.08)}\nbody{background:var(--bg);color:var(--text);font-family:\'Inter\',sans-serif;min-height:100vh}\nnav{display:flex;justify-content:space-between;align-items:center;padding:18px 40px;border-bottom:1px solid var(--border)}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:var(--mint)}\nnav a{color:var(--text2);text-decoration:none;font-size:14px;margin-left:20px}\n.nav-cta{background:var(--mint);color:var(--bg);padding:8px 18px;border-radius:8px;font-weight:700;color:#0a0a0f!important}\n.hero{text-align:center;padding:56px 20px 40px;max-width:760px;margin:0 auto}\n.badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,240,160,0.08);border:1px solid rgba(0,240,160,0.2);color:var(--mint);font-size:11px;padding:5px 14px;border-radius:20px;margin-bottom:18px;font-family:\'IBM Plex Mono\',monospace;letter-spacing:1px}\n.dot{width:6px;height:6px;border-radius:50%;background:var(--mint);animation:pulse 2s infinite}\n@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}\nh1{font-size:44px;font-weight:800;margin-bottom:12px;line-height:1.1}\nh1 span{color:var(--mint)}\n.sub{color:var(--text2);font-size:17px;margin-bottom:40px}\n.demo-wrap{max-width:760px;margin:0 auto;padding:0 20px 60px}\n.card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:20px}\n.card-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}\n.card-title{font-weight:700;font-size:15px}\n.card-body{padding:24px}\n.agents{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px}\n@media(max-width:500px){.agents{grid-template-columns:repeat(2,1fr)}}\n.agent{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px;cursor:pointer;font-size:12px;text-align:center;transition:all 0.15s;color:var(--text2);line-height:1.3}\n.agent:hover,.agent.sel{border-color:var(--mint);color:var(--mint);background:rgba(0,240,160,0.05)}\n.step{display:flex;gap:14px;margin-bottom:18px}\n.step-n{width:30px;height:30px;border-radius:50%;background:rgba(0,240,160,0.1);border:1px solid var(--mint);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--mint);flex-shrink:0;margin-top:2px}\n.step-title{font-weight:600;margin-bottom:3px;font-size:14px}\n.step-desc{font-size:12px;color:var(--text3)}\ninput{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;color:var(--text);font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-top:8px;transition:border-color 0.2s}\ninput:focus{border-color:var(--mint)}\n.btn{width:100%;background:var(--mint);color:var(--bg);border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:disabled{opacity:0.4;cursor:not-allowed}\n.btn:hover:not(:disabled){opacity:0.9}\n.loading{display:none;text-align:center;padding:32px;color:var(--text3)}\n.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--mint);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px}\n@keyframes spin{to{transform:rotate(360deg)}}\n.result{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:16px;font-size:13px;color:var(--text2);line-height:1.75;white-space:pre-wrap;word-break:break-word;display:none;max-height:400px;overflow-y:auto}\n.cta-bar{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:40px;text-align:center;max-width:760px;margin:0 auto 60px}\n.cta-bar h2{font-size:30px;font-weight:800;margin-bottom:10px}\n.cta-bar p{color:var(--text2);margin-bottom:24px}\n.cta-btn{display:inline-block;background:var(--mint);color:var(--bg);padding:16px 40px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:800;transition:opacity 0.2s}\n.cta-btn:hover{opacity:0.9}\n</style>\n</head>\n<body>\n<nav>\n  <div class="logo">APEX SWARM</div>\n  <div>\n    <div class="badge" style="display:inline-flex"><div class="dot"></div>Live</div>\n    <a href="/pricing">Pricing</a>\n    <a href="/signup" class="nav-cta">Get Started</a>\n  </div>\n</nav>\n<div class="hero">\n  <div class="badge"><div class="dot"></div>LIVE DEMO — NO SIGNUP REQUIRED</div>\n  <h1>Your AI workforce,<br><span>working right now</span></h1>\n  <p class="sub">Pick an agent. Give it a task. Watch real AI work in real time.</p>\n</div>\n<div class="demo-wrap">\n  <div class="card">\n    <div class="card-head">\n      <div class="card-title">⚡ Deploy an AI Agent</div>\n      <div class="badge" style="margin:0"><div class="dot"></div>Connected</div>\n    </div>\n    <div class="card-body">\n      <div class="step">\n        <div class="step-n">1</div>\n        <div>\n          <div class="step-title">Choose your agent</div>\n          <div class="step-desc">Pick the AI specialist for your task</div>\n          <div class="agents">\n            <div class="agent sel" onclick="sel(this,\'research\',\'Research Analyst\')">🔬 Research Analyst</div>\n            <div class="agent" onclick="sel(this,\'competitor-analyst\',\'Competitor Intel\')">🎯 Competitor Intel</div>\n            <div class="agent" onclick="sel(this,\'copywriter\',\'Copywriter\')">✍️ Copywriter</div>\n            <div class="agent" onclick="sel(this,\'financial-analyst\',\'Financial Analyst\')">📊 Financial Analyst</div>\n            <div class="agent" onclick="sel(this,\'social-media\',\'Social Media\')">📱 Social Media</div>\n            <div class="agent" onclick="sel(this,\'lead-qualifier\',\'Lead Qualifier\')">🏆 Lead Qualifier</div>\n          </div>\n        </div>\n      </div>\n      <div class="step">\n        <div class="step-n">2</div>\n        <div style="flex:1">\n          <div class="step-title">Give it a task</div>\n          <div class="step-desc">Be specific for better results</div>\n          <input type="text" id="taskInput" value="Analyze the competitive landscape for AI agent platforms in 2025 — who are the top players and what are their weaknesses?">\n        </div>\n      </div>\n      <div class="step">\n        <div class="step-n">3</div>\n        <div>\n          <div class="step-title">Watch it work</div>\n          <div class="step-desc">Real AI execution — no mock data, no pre-recorded responses</div>\n        </div>\n      </div>\n      <button class="btn" id="runBtn" onclick="runDemo()">⚡ Deploy Agent Now</button>\n      <div class="loading" id="loading">\n        <div class="spinner"></div>\n        <div id="loadingText" style="font-size:13px">Initializing agent...</div>\n      </div>\n      <div class="result" id="result"></div>\n    </div>\n  </div>\n</div>\n<div class="cta-bar">\n  <h2>Ready to scale this?</h2>\n  <p>Run 66+ agents 24/7. Get alerts on Slack and Telegram. Manage your whole AI workforce from one dashboard.</p>\n  <a href="/signup" class="cta-btn">Start Free — No Credit Card</a>\n  <div style="margin-top:14px;font-size:13px;color:var(--text3)">\n    <a href="/pricing" style="color:var(--mint)">See pricing</a> &nbsp;·&nbsp; <a href="/dashboard" style="color:var(--mint)">View dashboard</a>\n  </div>\n</div>\n<script>\nlet agentType = \'research\';\nconst tasks = {\n  \'research\': \'Analyze the competitive landscape for AI agent platforms in 2025 — who are the top players and what are their weaknesses?\',\n  \'competitor-analyst\': \'Compare Salesforce vs HubSpot CRM — key strengths, weaknesses, and which wins for mid-market B2B\',\n  \'copywriter\': \'Write 3 landing page headlines for an AI workforce platform targeting enterprise sales teams\',\n  \'financial-analyst\': \'Analyze Nvidia revenue growth trends and whether current valuation is justified\',\n  \'social-media\': \'Create 3 high-engagement LinkedIn posts announcing an AI workforce product launch\',\n  \'lead-qualifier\': \'Research Stripe as a potential enterprise customer for an AI tooling platform — score their fit\'\n};\nfunction sel(el, type, name) {\n  document.querySelectorAll(\'.agent\').forEach(a => a.classList.remove(\'sel\'));\n  el.classList.add(\'sel\');\n  agentType = type;\n  document.getElementById(\'taskInput\').value = tasks[type] || \'\';\n}\nasync function runDemo() {\n  const task = document.getElementById(\'taskInput\').value.trim();\n  if (!task) return;\n  const btn = document.getElementById(\'runBtn\');\n  const loading = document.getElementById(\'loading\');\n  const result = document.getElementById(\'result\');\n  const loadingText = document.getElementById(\'loadingText\');\n  btn.disabled = true;\n  loading.style.display = \'block\';\n  result.style.display = \'none\';\n  const msgs = [\'Initializing agent...\',\'Connecting to live tools...\',\'Researching and analyzing...\',\'Processing results...\',\'Almost done...\'];\n  let mi = 0;\n  const interval = setInterval(() => { loadingText.textContent = msgs[Math.min(mi++, msgs.length-1)]; }, 3500);\n  try {\n    const r = await fetch(\'/api/v1/deploy\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\', \'X-Api-Key\': \'dev-mode\'},\n      body: JSON.stringify({agent_type: agentType, task_description: task})\n    });\n    const data = await r.json();\n    clearInterval(interval);\n    if (data.agent_id) {\n      loadingText.textContent = \'Agent working...\';\n      let attempts = 0;\n      const poll = setInterval(async () => {\n        attempts++;\n        try {\n          const sr = await fetch(\'/api/v1/status/\' + data.agent_id, {headers: {\'X-Api-Key\': \'dev-mode\'}});\n          const sd = await sr.json();\n          if (sd.status === \'completed\' || sd.status === \'failed\' || attempts > 40) {\n            clearInterval(poll);\n            loading.style.display = \'none\';\n            result.style.display = \'block\';\n            result.textContent = sd.result || \'Agent completed. Open dashboard to see full results.\';\n            btn.disabled = false;\n          }\n        } catch(e) { if(attempts > 40) { clearInterval(poll); loading.style.display=\'none\'; btn.disabled=false; } }\n      }, 2000);\n    } else {\n      loading.style.display = \'none\';\n      result.style.display = \'block\';\n      result.textContent = JSON.stringify(data, null, 2);\n      btn.disabled = false;\n    }\n  } catch(e) {\n    clearInterval(interval);\n    loading.style.display = \'none\';\n    result.style.display = \'block\';\n    result.textContent = \'Error: \' + e.message;\n    btn.disabled = false;\n  }\n}\n</script>\n</body></html>\n'
+ACCEPT_INVITE_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Accept Invite — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\n.icon{font-size:48px;margin-bottom:16px;display:block;text-align:center}\nh1{font-size:24px;font-weight:800;margin-bottom:6px;text-align:center}\n.sub{color:#888;font-size:14px;margin-bottom:28px;text-align:center}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:hover{opacity:0.9}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.success{display:none;text-align:center;padding:20px;background:rgba(0,240,160,0.06);border:1px solid rgba(0,240,160,0.2);border-radius:10px;margin-top:16px}\n.success h3{color:#00f0a0;font-size:18px;margin-bottom:8px}\n.key{background:#0a0a0f;padding:8px 12px;border-radius:6px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;color:#00f0a0;word-break:break-all;margin:10px 0}\n.go{display:block;margin-top:16px;background:#00f0a0;color:#0a0a0f;border-radius:8px;padding:12px;font-weight:700;text-decoration:none;text-align:center}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <span class="icon">🤝</span>\n  <h1>You\'ve been invited</h1>\n  <p class="sub">Join your team\'s AI workforce platform</p>\n  <div class="err" id="err"></div>\n  <label>Your Email</label>\n  <input type="email" id="email" placeholder="your@email.com" autofocus>\n  <input type="hidden" id="token">\n  <button class="btn" onclick="acceptInvite()">Accept Invite & Join Team</button>\n  <div class="success" id="success">\n    <h3>Welcome to the team! 🎉</h3>\n    <p style="color:#aaa;font-size:13px;margin-bottom:8px">Your API Key (save this):</p>\n    <div class="key" id="apiKey"></div>\n    <a href="/dashboard" class="go">Open Dashboard →</a>\n  </div>\n</div>\n<script>\nconst params = new URLSearchParams(window.location.search);\ndocument.getElementById(\'token\').value = params.get(\'token\') || \'\';\nasync function acceptInvite() {\n  const email = document.getElementById(\'email\').value.trim();\n  const token = document.getElementById(\'token\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  if (!email) { err.textContent = \'Please enter your email\'; err.style.display = \'block\'; return; }\n  if (!token) { err.textContent = \'Invalid invite link\'; err.style.display = \'block\'; return; }\n  const r = await fetch(\'/api/v1/orgs/accept-invite\', {\n    method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n    body: JSON.stringify({token, email})\n  });\n  const data = await r.json();\n  if (!r.ok) { err.textContent = data.detail || \'Failed to accept invite\'; err.style.display = \'block\'; return; }\n  localStorage.setItem(\'apex_key\', data.api_key);\n  localStorage.setItem(\'apex_email\', email);\n  document.getElementById(\'apiKey\').textContent = data.api_key;\n  document.getElementById(\'success\').style.display = \'block\';\n  document.querySelector(\'.btn\').style.display = \'none\';\n}\n</script>\n</body></html>\n'
+
+
+# ─── STATIC HTML PAGES ───────────────────────────────────
+SIGNUP_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Sign Up — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\nh1{font-size:26px;font-weight:800;margin-bottom:6px}\n.sub{color:#888;font-size:14px;margin-bottom:28px}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{display:block;width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s;text-align:center;text-decoration:none;margin-bottom:12px}\n.btn:hover{opacity:0.9}\n.btn.outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0;display:flex;align-items:center;justify-content:center;gap:10px}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.link{text-align:center;margin-top:16px;font-size:13px;color:#888}\n.link a{color:#00f0a0;text-decoration:none}\n.divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#555;font-size:12px}\n.divider:before,.divider:after{content:\'\';flex:1;height:1px;background:rgba(255,255,255,0.08)}\n.features{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}\n.feat{font-size:12px;color:#aaa;display:flex;align-items:center;gap:5px}\n.feat span{color:#00f0a0}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <h1>Start your AI workforce</h1>\n  <p class="sub">Deploy 66+ autonomous AI agents in 60 seconds</p>\n  <div class="features">\n    <div class="feat"><span>✓</span> Free to start</div>\n    <div class="feat"><span>✓</span> No credit card</div>\n    <div class="feat"><span>✓</span> 24/7 workers</div>\n  </div>\n  <a href="/api/v1/auth/google" class="btn outline">\n    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.3z"/></svg>\n    Continue with Google\n  </a>\n  <div class="divider">or</div>\n  <div class="err" id="err"></div>\n  <label>Email</label>\n  <input type="email" id="email" placeholder="you@company.com" autofocus>\n  <label>Password</label>\n  <input type="password" id="password" placeholder="At least 8 characters">\n  <button class="btn" onclick="doSignup()">Create Free Account</button>\n  <div class="link">Already have an account? <a href="/login">Sign in</a> · <a href="/pricing">See pricing</a></div>\n</div>\n<script>\nasync function doSignup() {\n  const email = document.getElementById(\'email\').value.trim();\n  const password = document.getElementById(\'password\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  if (!email || !password) { err.textContent = \'Please fill in all fields\'; err.style.display = \'block\'; return; }\n  try {\n    const r = await fetch(\'/api/v1/auth/signup\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n      body: JSON.stringify({email, password})\n    });\n    const data = await r.json();\n    if (!r.ok) { err.textContent = data.detail || \'Signup failed\'; err.style.display = \'block\'; return; }\n    localStorage.setItem(\'apex_token\', data.token);\n    localStorage.setItem(\'apex_key\', data.api_key);\n    localStorage.setItem(\'apex_email\', data.email);\n    window.location.href = \'/dashboard\';\n  } catch(e) { err.textContent = \'Network error — please try again\'; err.style.display = \'block\'; }\n}\ndocument.addEventListener(\'keydown\', e => { if(e.key === \'Enter\') doSignup(); });\n</script>\n</body></html>\n'
+LOGIN_HTML_NEW = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Sign In — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\nh1{font-size:26px;font-weight:800;margin-bottom:6px}\n.sub{color:#888;font-size:14px;margin-bottom:28px}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{display:block;width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s;text-align:center;text-decoration:none;margin-bottom:12px}\n.btn:hover{opacity:0.9}\n.btn.outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0;display:flex;align-items:center;justify-content:center;gap:10px}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.link{text-align:center;margin-top:16px;font-size:13px;color:#888}\n.link a{color:#00f0a0;text-decoration:none}\n.divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#555;font-size:12px}\n.divider:before,.divider:after{content:\'\';flex:1;height:1px;background:rgba(255,255,255,0.08)}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <h1>Welcome back</h1>\n  <p class="sub">Sign in to your AI workforce</p>\n  <a href="/api/v1/auth/google" class="btn outline">\n    <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.3z"/></svg>\n    Continue with Google\n  </a>\n  <div class="divider">or</div>\n  <div class="err" id="err"></div>\n  <label>Email</label>\n  <input type="email" id="email" placeholder="you@company.com" autofocus>\n  <label>Password</label>\n  <input type="password" id="password" placeholder="Your password">\n  <button class="btn" onclick="doLogin()">Sign In</button>\n  <div class="link">No account? <a href="/signup">Sign up free</a> · <a href="/pricing">Pricing</a></div>\n</div>\n<script>\nconst params = new URLSearchParams(window.location.search);\nif (params.get(\'error\')) {\n  const err = document.getElementById(\'err\');\n  err.textContent = \'Google sign-in failed. Please try email/password or try again.\';\n  err.style.display = \'block\';\n}\nasync function doLogin() {\n  const email = document.getElementById(\'email\').value.trim();\n  const password = document.getElementById(\'password\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  try {\n    const r = await fetch(\'/api/v1/auth/login\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n      body: JSON.stringify({email, password})\n    });\n    const data = await r.json();\n    if (!r.ok) { err.textContent = data.detail || \'Login failed\'; err.style.display = \'block\'; return; }\n    localStorage.setItem(\'apex_token\', data.token);\n    localStorage.setItem(\'apex_key\', data.api_key);\n    localStorage.setItem(\'apex_email\', data.email);\n    window.location.href = \'/dashboard\';\n  } catch(e) { err.textContent = \'Network error — please try again\'; err.style.display = \'block\'; }\n}\ndocument.addEventListener(\'keydown\', e => { if(e.key === \'Enter\') doLogin(); });\n</script>\n</body></html>\n'
+PRICING_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Pricing — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;padding:0 20px 80px}\nnav{display:flex;justify-content:space-between;align-items:center;padding:20px 0;max-width:1000px;margin:0 auto 48px;border-bottom:1px solid rgba(255,255,255,0.06)}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0}\nnav a{color:#888;text-decoration:none;font-size:14px;margin-left:20px}\nnav a:hover{color:#e8e8f0}\n.nav-cta{background:#00f0a0;color:#0a0a0f;padding:8px 18px;border-radius:8px;font-weight:700}\n.hero{text-align:center;max-width:1000px;margin:0 auto 60px}\n.badge{display:inline-block;background:rgba(0,240,160,0.1);border:1px solid rgba(0,240,160,0.2);color:#00f0a0;font-size:11px;padding:5px 14px;border-radius:20px;margin-bottom:16px;font-family:\'IBM Plex Mono\',monospace;letter-spacing:1px}\nh1{font-size:48px;font-weight:800;margin-bottom:14px;line-height:1.1}\n.sub{color:#888;font-size:18px;max-width:540px;margin:0 auto}\n.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1000px;margin:0 auto 32px}\n@media(max-width:700px){.grid{grid-template-columns:1fr}}\n.tier{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px;position:relative;transition:border-color 0.2s}\n.tier:hover{border-color:rgba(255,255,255,0.15)}\n.tier.featured{border-color:#00f0a0;background:rgba(0,240,160,0.03)}\n.tier-badge{position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:#00f0a0;color:#0a0a0f;font-size:10px;font-weight:700;padding:4px 14px;border-radius:20px;letter-spacing:1.5px;white-space:nowrap}\n.tier-name{font-size:20px;font-weight:700;margin-bottom:6px}\n.price{font-size:48px;font-weight:800;color:#00f0a0;line-height:1;margin:12px 0 4px}\n.price span{font-size:16px;color:#666;font-weight:400}\n.desc{color:#888;font-size:13px;margin-bottom:24px}\nul{list-style:none;margin-bottom:28px}\nli{padding:8px 0;font-size:14px;color:#aaa;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;gap:8px}\nli:last-child{border:none}\nli:before{content:"✓";color:#00f0a0;font-weight:700;flex-shrink:0}\n.btn{display:block;width:100%;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;text-align:center;text-decoration:none;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:hover{opacity:0.9}\n.btn-mint{background:#00f0a0;color:#0a0a0f}\n.btn-outline{background:transparent;border:1px solid rgba(255,255,255,0.15);color:#e8e8f0}\n.enterprise-bar{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px 40px;max-width:1000px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px}\n.faq{max-width:700px;margin:48px auto 0}\n.faq h2{font-size:28px;font-weight:800;margin-bottom:24px;text-align:center}\n.q{margin-bottom:20px;padding:20px;background:#13131a;border-radius:10px;border:1px solid rgba(255,255,255,0.06)}\n.q strong{display:block;margin-bottom:8px;font-size:15px}\n.q p{color:#888;font-size:14px;line-height:1.6}\n</style>\n</head>\n<body>\n<nav>\n  <div class="logo">APEX SWARM</div>\n  <div>\n    <a href="/demo">Live Demo</a>\n    <a href="/login">Sign In</a>\n    <a href="/signup" class="nav-cta">Get Started</a>\n  </div>\n</nav>\n<div class="hero">\n  <div class="badge">PRICING</div>\n  <h1>Your AI workforce.<br>Pay as you grow.</h1>\n  <p class="sub">Start free. Upgrade when your AI agents need to work harder.</p>\n</div>\n<div class="grid">\n  <div class="tier">\n    <div class="tier-name">Starter</div>\n    <div class="price">$49<span>/mo</span></div>\n    <div class="desc">For individuals and small teams</div>\n    <ul>\n      <li>25 agent runs per day</li>\n      <li>1 background worker (daemon)</li>\n      <li>3 scheduled tasks</li>\n      <li>Telegram alerts</li>\n      <li>All 66+ agent types</li>\n      <li>API access</li>\n    </ul>\n    <a href="/signup" class="btn btn-outline">Get Started</a>\n  </div>\n  <div class="tier featured">\n    <div class="tier-badge">MOST POPULAR</div>\n    <div class="tier-name">Pro</div>\n    <div class="price">$199<span>/mo</span></div>\n    <div class="desc">For growing teams that need more</div>\n    <ul>\n      <li>100 agent runs per day</li>\n      <li>5 background workers</li>\n      <li>10 scheduled tasks</li>\n      <li>Telegram + Slack alerts</li>\n      <li>Team access (5 seats)</li>\n      <li>Priority execution queue</li>\n      <li>Workflow automation</li>\n    </ul>\n    <a href="/signup" class="btn btn-mint">Start Free Trial</a>\n  </div>\n  <div class="tier">\n    <div class="tier-name">Enterprise</div>\n    <div class="price">$999<span>/mo</span></div>\n    <div class="desc">Unlimited AI workforce at scale</div>\n    <ul>\n      <li>Unlimited agent runs</li>\n      <li>50 background workers</li>\n      <li>Unlimited scheduled tasks</li>\n      <li>All output channels</li>\n      <li>Unlimited team seats</li>\n      <li>Audit logs + SSO</li>\n      <li>Dedicated support SLA</li>\n      <li>Custom agent training</li>\n    </ul>\n    <a href="mailto:sales@apexswarm.ai" class="btn btn-outline">Contact Sales</a>\n  </div>\n</div>\n<div class="enterprise-bar">\n  <div>\n    <div style="font-size:20px;font-weight:700;margin-bottom:6px">Need a custom plan?</div>\n    <div style="color:#888;font-size:14px">White-label, on-premise, custom agents, or volume pricing available.</div>\n  </div>\n  <a href="mailto:sales@apexswarm.ai" class="btn btn-mint" style="width:auto;padding:14px 32px">Talk to Sales</a>\n</div>\n<div class="faq">\n  <h2>Common questions</h2>\n  <div class="q"><strong>What\'s an agent run?</strong><p>Each time you deploy an agent to complete a task, that counts as one run. Background workers (daemons) use runs each time they cycle.</p></div>\n  <div class="q"><strong>What\'s a background worker?</strong><p>A daemon — an AI agent that runs continuously on a schedule, monitoring for conditions and firing alerts to Telegram or Slack when they\'re met.</p></div>\n  <div class="q"><strong>Can I cancel anytime?</strong><p>Yes. Cancel from your dashboard at any time. You keep access until the end of your billing period.</p></div>\n  <div class="q"><strong>Do you offer a free trial?</strong><p>Free accounts can run up to 5 agents per day. Upgrade anytime. No credit card required to start.</p></div>\n</div>\n</body></html>\n'
+DEMO_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Live Demo — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\n:root{--bg:#0a0a0f;--bg2:#13131a;--mint:#00f0a0;--text:#e8e8f0;--text2:#aaa;--text3:#555;--border:rgba(255,255,255,0.08)}\nbody{background:var(--bg);color:var(--text);font-family:\'Inter\',sans-serif;min-height:100vh}\nnav{display:flex;justify-content:space-between;align-items:center;padding:18px 40px;border-bottom:1px solid var(--border)}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:var(--mint)}\nnav a{color:var(--text2);text-decoration:none;font-size:14px;margin-left:20px}\n.nav-cta{background:var(--mint);color:var(--bg);padding:8px 18px;border-radius:8px;font-weight:700;color:#0a0a0f!important}\n.hero{text-align:center;padding:56px 20px 40px;max-width:760px;margin:0 auto}\n.badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,240,160,0.08);border:1px solid rgba(0,240,160,0.2);color:var(--mint);font-size:11px;padding:5px 14px;border-radius:20px;margin-bottom:18px;font-family:\'IBM Plex Mono\',monospace;letter-spacing:1px}\n.dot{width:6px;height:6px;border-radius:50%;background:var(--mint);animation:pulse 2s infinite}\n@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}\nh1{font-size:44px;font-weight:800;margin-bottom:12px;line-height:1.1}\nh1 span{color:var(--mint)}\n.sub{color:var(--text2);font-size:17px;margin-bottom:40px}\n.demo-wrap{max-width:760px;margin:0 auto;padding:0 20px 60px}\n.card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:20px}\n.card-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}\n.card-title{font-weight:700;font-size:15px}\n.card-body{padding:24px}\n.agents{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px}\n@media(max-width:500px){.agents{grid-template-columns:repeat(2,1fr)}}\n.agent{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px;cursor:pointer;font-size:12px;text-align:center;transition:all 0.15s;color:var(--text2);line-height:1.3}\n.agent:hover,.agent.sel{border-color:var(--mint);color:var(--mint);background:rgba(0,240,160,0.05)}\n.step{display:flex;gap:14px;margin-bottom:18px}\n.step-n{width:30px;height:30px;border-radius:50%;background:rgba(0,240,160,0.1);border:1px solid var(--mint);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--mint);flex-shrink:0;margin-top:2px}\n.step-title{font-weight:600;margin-bottom:3px;font-size:14px}\n.step-desc{font-size:12px;color:var(--text3)}\ninput{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;color:var(--text);font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-top:8px;transition:border-color 0.2s}\ninput:focus{border-color:var(--mint)}\n.btn{width:100%;background:var(--mint);color:var(--bg);border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;margin-top:16px;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:disabled{opacity:0.4;cursor:not-allowed}\n.btn:hover:not(:disabled){opacity:0.9}\n.loading{display:none;text-align:center;padding:32px;color:var(--text3)}\n.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--mint);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px}\n@keyframes spin{to{transform:rotate(360deg)}}\n.result{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:16px;font-size:13px;color:var(--text2);line-height:1.75;white-space:pre-wrap;word-break:break-word;display:none;max-height:400px;overflow-y:auto}\n.cta-bar{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:40px;text-align:center;max-width:760px;margin:0 auto 60px}\n.cta-bar h2{font-size:30px;font-weight:800;margin-bottom:10px}\n.cta-bar p{color:var(--text2);margin-bottom:24px}\n.cta-btn{display:inline-block;background:var(--mint);color:var(--bg);padding:16px 40px;border-radius:10px;text-decoration:none;font-size:16px;font-weight:800;transition:opacity 0.2s}\n.cta-btn:hover{opacity:0.9}\n</style>\n</head>\n<body>\n<nav>\n  <div class="logo">APEX SWARM</div>\n  <div>\n    <div class="badge" style="display:inline-flex"><div class="dot"></div>Live</div>\n    <a href="/pricing">Pricing</a>\n    <a href="/signup" class="nav-cta">Get Started</a>\n  </div>\n</nav>\n<div class="hero">\n  <div class="badge"><div class="dot"></div>LIVE DEMO — NO SIGNUP REQUIRED</div>\n  <h1>Your AI workforce,<br><span>working right now</span></h1>\n  <p class="sub">Pick an agent. Give it a task. Watch real AI work in real time.</p>\n</div>\n<div class="demo-wrap">\n  <div class="card">\n    <div class="card-head">\n      <div class="card-title">⚡ Deploy an AI Agent</div>\n      <div class="badge" style="margin:0"><div class="dot"></div>Connected</div>\n    </div>\n    <div class="card-body">\n      <div class="step">\n        <div class="step-n">1</div>\n        <div>\n          <div class="step-title">Choose your agent</div>\n          <div class="step-desc">Pick the AI specialist for your task</div>\n          <div class="agents">\n            <div class="agent sel" onclick="sel(this,\'research\',\'Research Analyst\')">🔬 Research Analyst</div>\n            <div class="agent" onclick="sel(this,\'competitor-analyst\',\'Competitor Intel\')">🎯 Competitor Intel</div>\n            <div class="agent" onclick="sel(this,\'copywriter\',\'Copywriter\')">✍️ Copywriter</div>\n            <div class="agent" onclick="sel(this,\'financial-analyst\',\'Financial Analyst\')">📊 Financial Analyst</div>\n            <div class="agent" onclick="sel(this,\'social-media\',\'Social Media\')">📱 Social Media</div>\n            <div class="agent" onclick="sel(this,\'lead-qualifier\',\'Lead Qualifier\')">🏆 Lead Qualifier</div>\n          </div>\n        </div>\n      </div>\n      <div class="step">\n        <div class="step-n">2</div>\n        <div style="flex:1">\n          <div class="step-title">Give it a task</div>\n          <div class="step-desc">Be specific for better results</div>\n          <input type="text" id="taskInput" value="Analyze the competitive landscape for AI agent platforms in 2025 — who are the top players and what are their weaknesses?">\n        </div>\n      </div>\n      <div class="step">\n        <div class="step-n">3</div>\n        <div>\n          <div class="step-title">Watch it work</div>\n          <div class="step-desc">Real AI execution — no mock data, no pre-recorded responses</div>\n        </div>\n      </div>\n      <button class="btn" id="runBtn" onclick="runDemo()">⚡ Deploy Agent Now</button>\n      <div class="loading" id="loading">\n        <div class="spinner"></div>\n        <div id="loadingText" style="font-size:13px">Initializing agent...</div>\n      </div>\n      <div class="result" id="result"></div>\n    </div>\n  </div>\n</div>\n<div class="cta-bar">\n  <h2>Ready to scale this?</h2>\n  <p>Run 66+ agents 24/7. Get alerts on Slack and Telegram. Manage your whole AI workforce from one dashboard.</p>\n  <a href="/signup" class="cta-btn">Start Free — No Credit Card</a>\n  <div style="margin-top:14px;font-size:13px;color:var(--text3)">\n    <a href="/pricing" style="color:var(--mint)">See pricing</a> &nbsp;·&nbsp; <a href="/dashboard" style="color:var(--mint)">View dashboard</a>\n  </div>\n</div>\n<script>\nlet agentType = \'research\';\nconst tasks = {\n  \'research\': \'Analyze the competitive landscape for AI agent platforms in 2025 — who are the top players and what are their weaknesses?\',\n  \'competitor-analyst\': \'Compare Salesforce vs HubSpot CRM — key strengths, weaknesses, and which wins for mid-market B2B\',\n  \'copywriter\': \'Write 3 landing page headlines for an AI workforce platform targeting enterprise sales teams\',\n  \'financial-analyst\': \'Analyze Nvidia revenue growth trends and whether current valuation is justified\',\n  \'social-media\': \'Create 3 high-engagement LinkedIn posts announcing an AI workforce product launch\',\n  \'lead-qualifier\': \'Research Stripe as a potential enterprise customer for an AI tooling platform — score their fit\'\n};\nfunction sel(el, type, name) {\n  document.querySelectorAll(\'.agent\').forEach(a => a.classList.remove(\'sel\'));\n  el.classList.add(\'sel\');\n  agentType = type;\n  document.getElementById(\'taskInput\').value = tasks[type] || \'\';\n}\nasync function runDemo() {\n  const task = document.getElementById(\'taskInput\').value.trim();\n  if (!task) return;\n  const btn = document.getElementById(\'runBtn\');\n  const loading = document.getElementById(\'loading\');\n  const result = document.getElementById(\'result\');\n  const loadingText = document.getElementById(\'loadingText\');\n  btn.disabled = true;\n  loading.style.display = \'block\';\n  result.style.display = \'none\';\n  const msgs = [\'Initializing agent...\',\'Connecting to live tools...\',\'Researching and analyzing...\',\'Processing results...\',\'Almost done...\'];\n  let mi = 0;\n  const interval = setInterval(() => { loadingText.textContent = msgs[Math.min(mi++, msgs.length-1)]; }, 3500);\n  try {\n    const r = await fetch(\'/api/v1/deploy\', {\n      method: \'POST\', headers: {\'Content-Type\': \'application/json\', \'X-Api-Key\': \'dev-mode\'},\n      body: JSON.stringify({agent_type: agentType, task_description: task})\n    });\n    const data = await r.json();\n    clearInterval(interval);\n    if (data.agent_id) {\n      loadingText.textContent = \'Agent working...\';\n      let attempts = 0;\n      const poll = setInterval(async () => {\n        attempts++;\n        try {\n          const sr = await fetch(\'/api/v1/status/\' + data.agent_id, {headers: {\'X-Api-Key\': \'dev-mode\'}});\n          const sd = await sr.json();\n          if (sd.status === \'completed\' || sd.status === \'failed\' || attempts > 40) {\n            clearInterval(poll);\n            loading.style.display = \'none\';\n            result.style.display = \'block\';\n            result.textContent = sd.result || \'Agent completed. Open dashboard to see full results.\';\n            btn.disabled = false;\n          }\n        } catch(e) { if(attempts > 40) { clearInterval(poll); loading.style.display=\'none\'; btn.disabled=false; } }\n      }, 2000);\n    } else {\n      loading.style.display = \'none\';\n      result.style.display = \'block\';\n      result.textContent = JSON.stringify(data, null, 2);\n      btn.disabled = false;\n    }\n  } catch(e) {\n    clearInterval(interval);\n    loading.style.display = \'none\';\n    result.style.display = \'block\';\n    result.textContent = \'Error: \' + e.message;\n    btn.disabled = false;\n  }\n}\n</script>\n</body></html>\n'
+ACCEPT_INVITE_HTML = '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">\n<title>Accept Invite — APEX SWARM</title>\n<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n<style>\n*{margin:0;padding:0;box-sizing:border-box}\nbody{background:#0a0a0f;color:#e8e8f0;font-family:\'Inter\',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}\n.card{background:#13131a;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:40px;width:100%;max-width:440px}\n.logo{font-family:\'IBM Plex Mono\',monospace;font-size:12px;letter-spacing:3px;color:#00f0a0;text-transform:uppercase;margin-bottom:10px}\n.icon{font-size:48px;margin-bottom:16px;display:block;text-align:center}\nh1{font-size:24px;font-weight:800;margin-bottom:6px;text-align:center}\n.sub{color:#888;font-size:14px;margin-bottom:28px;text-align:center}\nlabel{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888;margin-bottom:6px}\ninput{width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px 14px;color:#e8e8f0;font-size:14px;font-family:\'Inter\',sans-serif;outline:none;margin-bottom:18px;transition:border-color 0.2s}\ninput:focus{border-color:#00f0a0}\n.btn{width:100%;background:#00f0a0;color:#0a0a0f;border:none;border-radius:8px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;transition:opacity 0.2s}\n.btn:hover{opacity:0.9}\n.err{color:#ff4d6d;font-size:13px;margin-bottom:16px;display:none;padding:10px;background:rgba(255,77,109,0.1);border-radius:6px}\n.success{display:none;text-align:center;padding:20px;background:rgba(0,240,160,0.06);border:1px solid rgba(0,240,160,0.2);border-radius:10px;margin-top:16px}\n.success h3{color:#00f0a0;font-size:18px;margin-bottom:8px}\n.key{background:#0a0a0f;padding:8px 12px;border-radius:6px;font-family:\'IBM Plex Mono\',monospace;font-size:13px;color:#00f0a0;word-break:break-all;margin:10px 0}\n.go{display:block;margin-top:16px;background:#00f0a0;color:#0a0a0f;border-radius:8px;padding:12px;font-weight:700;text-decoration:none;text-align:center}\n</style>\n</head>\n<body>\n<div class="card">\n  <div class="logo">APEX SWARM</div>\n  <span class="icon">🤝</span>\n  <h1>You\'ve been invited</h1>\n  <p class="sub">Join your team\'s AI workforce platform</p>\n  <div class="err" id="err"></div>\n  <label>Your Email</label>\n  <input type="email" id="email" placeholder="your@email.com" autofocus>\n  <input type="hidden" id="token">\n  <button class="btn" onclick="acceptInvite()">Accept Invite & Join Team</button>\n  <div class="success" id="success">\n    <h3>Welcome to the team! 🎉</h3>\n    <p style="color:#aaa;font-size:13px;margin-bottom:8px">Your API Key (save this):</p>\n    <div class="key" id="apiKey"></div>\n    <a href="/dashboard" class="go">Open Dashboard →</a>\n  </div>\n</div>\n<script>\nconst params = new URLSearchParams(window.location.search);\ndocument.getElementById(\'token\').value = params.get(\'token\') || \'\';\nasync function acceptInvite() {\n  const email = document.getElementById(\'email\').value.trim();\n  const token = document.getElementById(\'token\').value;\n  const err = document.getElementById(\'err\');\n  err.style.display = \'none\';\n  if (!email) { err.textContent = \'Please enter your email\'; err.style.display = \'block\'; return; }\n  if (!token) { err.textContent = \'Invalid invite link\'; err.style.display = \'block\'; return; }\n  const r = await fetch(\'/api/v1/orgs/accept-invite\', {\n    method: \'POST\', headers: {\'Content-Type\': \'application/json\'},\n    body: JSON.stringify({token, email})\n  });\n  const data = await r.json();\n  if (!r.ok) { err.textContent = data.detail || \'Failed to accept invite\'; err.style.display = \'block\'; return; }\n  localStorage.setItem(\'apex_key\', data.api_key);\n  localStorage.setItem(\'apex_email\', email);\n  document.getElementById(\'apiKey\').textContent = data.api_key;\n  document.getElementById(\'success\').style.display = \'block\';\n  document.querySelector(\'.btn\').style.display = \'none\';\n}\n</script>\n</body></html>\n'
+
+@app.get("/signup", response_class=HTMLResponse)
+async def signup_page(): return HTMLResponse(SIGNUP_HTML)
+
 @app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return HTMLResponse(LOGIN_HTML)
+async def login_page_new(): return HTMLResponse(LOGIN_HTML_NEW)
+
+@app.get("/pricing", response_class=HTMLResponse)
+async def pricing_page(): return HTMLResponse(PRICING_HTML)
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_page(): return HTMLResponse(DEMO_HTML)
+
+@app.get("/accept-invite", response_class=HTMLResponse)
+async def accept_invite_page(): return HTMLResponse(ACCEPT_INVITE_HTML)
+
+@app.get("/signup", response_class=HTMLResponse)
+async def signup_page(): return HTMLResponse(SIGNUP_HTML)
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page_new(): return HTMLResponse(LOGIN_HTML_NEW)
+
+@app.get("/pricing", response_class=HTMLResponse)
+async def pricing_page(): return HTMLResponse(PRICING_HTML)
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo_page(): return HTMLResponse(DEMO_HTML)
+
+@app.get("/accept-invite", response_class=HTMLResponse)
+async def accept_invite_page(): return HTMLResponse(ACCEPT_INVITE_HTML)
 
 @app.get("/", response_class=HTMLResponse)
+async def landing_page():
+    return HTMLResponse(LANDING_HTML)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return HTMLResponse(DASHBOARD_HTML.replace("__VERSION__", VERSION))
 
 
+
+LANDING_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>APEX SWARM — Autonomous AI Workforce</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#04040a;--bg2:#080810;--bg3:#0e0e1a;--mint:#00ffaa;--mint2:#00cc88;--mintglow:rgba(0,255,170,0.12);--text:#f0f0f8;--text2:#7878a0;--text3:#2e2e4a;--border:rgba(255,255,255,0.05);--rose:#ff3366;--amber:#ffaa00;--violet:#8855ff}
+html{scroll-behavior:auto}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;overflow-x:hidden;cursor:none}
+#cursor{position:fixed;width:8px;height:8px;background:var(--mint);border-radius:50%;pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:width .3s,height .3s;mix-blend-mode:difference}
+#cursor-follower{position:fixed;width:32px;height:32px;border:1px solid rgba(0,255,170,0.4);border-radius:50%;pointer-events:none;z-index:9998;transform:translate(-50%,-50%)}
+#particle-canvas{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5}
+nav{position:fixed;top:0;left:0;right:0;z-index:500;display:flex;align-items:center;justify-content:space-between;padding:24px 64px;transition:all .4s}
+nav.scrolled{background:rgba(4,4,10,0.92);backdrop-filter:blur(24px);border-bottom:1px solid var(--border);padding:16px 64px}
+.nav-logo{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:4px;color:var(--mint);text-decoration:none}
+.nav-center{display:flex;gap:36px}
+.nav-center a{color:var(--text2);text-decoration:none;font-size:13px;transition:color .2s;position:relative}
+.nav-center a::after{content:'';position:absolute;bottom:-2px;left:0;width:0;height:1px;background:var(--mint);transition:width .3s}
+.nav-center a:hover{color:var(--text)}.nav-center a:hover::after{width:100%}
+.nav-right{display:flex;gap:12px;align-items:center}
+.btn-ghost{color:var(--text2);text-decoration:none;font-size:13px;font-weight:500;padding:9px 20px;border:1px solid var(--border);border-radius:6px;transition:all .2s}
+.btn-ghost:hover{border-color:var(--text3);color:var(--text)}
+.btn-mint{color:#04040a;background:var(--mint);text-decoration:none;font-size:13px;font-weight:600;padding:9px 20px;border-radius:6px;transition:all .25s}
+.btn-mint:hover{background:var(--mint2);box-shadow:0 0 24px rgba(0,255,170,0.3)}
+.hero{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:120px 64px 80px;text-align:center;overflow:hidden}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--mint);text-transform:uppercase;margin-bottom:40px;opacity:0;border:1px solid rgba(0,255,170,0.2);background:rgba(0,255,170,0.05);padding:8px 20px;border-radius:100px}
+.eyebrow-dot{width:5px;height:5px;border-radius:50%;background:var(--mint);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.hero-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(80px,12vw,180px);line-height:.88;letter-spacing:-2px;margin-bottom:32px}
+.hero-title .line{overflow:hidden;display:block}
+.hero-title .word{display:inline-block;transform:translateY(110%);opacity:0}
+.hero-title .accent{color:transparent;-webkit-text-stroke:1.5px var(--mint);filter:drop-shadow(0 0 20px rgba(0,255,170,0.3))}
+.hero-sub{font-size:clamp(15px,2vw,20px);color:var(--text2);font-weight:300;max-width:560px;line-height:1.8;margin-bottom:52px;opacity:0}
+.hero-cta{display:flex;gap:14px;justify-content:center;opacity:0}
+.cta-primary{display:inline-flex;align-items:center;gap:10px;background:var(--mint);color:#04040a;padding:16px 36px;border-radius:8px;font-weight:600;font-size:15px;text-decoration:none;transition:all .3s;position:relative;overflow:hidden}
+.cta-primary::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent);transform:translateX(-100%);transition:transform .5s}
+.cta-primary:hover::before{transform:translateX(100%)}
+.cta-primary:hover{box-shadow:0 0 40px rgba(0,255,170,0.4);transform:translateY(-2px)}
+.cta-secondary{display:inline-flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,0.1);color:var(--text2);padding:16px 36px;border-radius:8px;font-weight:500;font-size:15px;text-decoration:none;transition:all .3s}
+.cta-secondary:hover{border-color:rgba(255,255,255,0.2);color:var(--text)}
+.hero-metrics{position:absolute;bottom:48px;display:flex;gap:64px;opacity:0;font-family:'IBM Plex Mono',monospace}
+.metric-val{font-size:32px;font-weight:700;color:var(--mint);letter-spacing:-1px}
+.metric-label{font-size:10px;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-top:4px}
+.marquee-wrap{position:relative;z-index:1;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--bg2);padding:16px 0;overflow:hidden;display:flex}
+.marquee-track{display:flex;animation:marquee 25s linear infinite;white-space:nowrap;flex-shrink:0}
+.marquee-wrap:hover .marquee-track{animation-play-state:paused}
+.marquee-item{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;padding:0 48px;border-right:1px solid var(--border);display:flex;align-items:center;gap:12px}
+.marquee-item .dot{width:5px;height:5px;border-radius:50%;background:var(--mint);flex-shrink:0}
+@keyframes marquee{to{transform:translateX(-50%)}}
+section{position:relative;z-index:1}
+.container{max-width:1200px;margin:0 auto;padding:0 64px}
+.s-label{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--mint);text-transform:uppercase;margin-bottom:24px;display:flex;align-items:center;gap:12px}
+.s-label::before{content:'';width:24px;height:1px;background:var(--mint)}
+.s-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(48px,6vw,80px);line-height:.95;letter-spacing:-1px;margin-bottom:24px}
+.bento{padding:120px 0;background:var(--bg)}
+.bento-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:2px;margin-top:64px;border-radius:16px;overflow:hidden;border:1px solid var(--border)}
+.bento-card{background:var(--bg2);padding:36px;position:relative;overflow:hidden;transition:background .3s}
+.bento-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at var(--mx,50%) var(--my,50%),var(--mintglow),transparent 60%);opacity:0;transition:opacity .3s}
+.bento-card:hover{background:var(--bg3)}.bento-card:hover::before{opacity:1}
+.bc-1{grid-column:span 8;grid-row:span 2}.bc-2,.bc-3{grid-column:span 4}.bc-4,.bc-5{grid-column:span 4}.bc-6,.bc-7{grid-column:span 4}
+.bento-icon{font-size:32px;margin-bottom:20px;display:block}
+.bento-title{font-size:20px;font-weight:600;margin-bottom:10px;letter-spacing:-.3px}
+.bento-desc{font-size:13px;color:var(--text3);line-height:1.7}
+.bento-tag{display:inline-block;margin-top:14px;font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;letter-spacing:1px;background:var(--mintglow);color:var(--mint);border:1px solid rgba(0,255,170,0.15);border-radius:4px}
+.bento-big-num{font-family:'Bebas Neue',sans-serif;font-size:96px;line-height:1;color:var(--mint);margin-bottom:16px;letter-spacing:-3px}
+.bento-terminal{margin-top:24px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.9}
+.bt-green{color:var(--mint)}.bt-amber{color:var(--amber)}.bt-dim{color:var(--text3)}
+.features-scroll{padding:160px 0;background:var(--bg2)}
+.features-sticky{display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:start}
+.sticky-left{position:sticky;top:100px}
+.feature-item{padding:28px 0;border-bottom:1px solid var(--border);opacity:.3;transition:opacity .4s;cursor:default}
+.feature-item.active{opacity:1}
+.feature-num{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mint);letter-spacing:2px;margin-bottom:8px}
+.feature-title{font-size:18px;font-weight:600;margin-bottom:8px;letter-spacing:-.2px}
+.feature-desc{font-size:13px;color:var(--text3);line-height:1.7}
+.feature-visual{border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--bg3);opacity:0;transform:translateY(32px);transition:all .5s;display:none}
+.feature-visual.show{opacity:1;transform:translateY(0);display:block}
+.fv-head{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+.fv-dot{width:8px;height:8px;border-radius:50%}
+.fv-body{padding:24px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:2}
+.fv-tag{font-size:9px;margin-left:auto;letter-spacing:2px;color:var(--text3)}
+.agents{padding:160px 0;background:var(--bg)}
+.agent-scroll{display:flex;gap:16px;overflow-x:auto;scrollbar-width:none;padding:4px 64px 20px;margin:60px -64px 0;scroll-snap-type:x mandatory}
+.agent-scroll::-webkit-scrollbar{display:none}
+.agent-pill{flex-shrink:0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px 28px;min-width:220px;scroll-snap-align:start;transition:all .3s;cursor:default;position:relative;overflow:hidden}
+.agent-pill::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--mint);transform:scaleX(0);transform-origin:left;transition:transform .3s}
+.agent-pill:hover{border-color:rgba(0,255,170,0.2);transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,0,0,.4)}
+.agent-pill:hover::after{transform:scaleX(1)}
+.agent-pill-icon{font-size:28px;margin-bottom:14px}.agent-pill-name{font-size:14px;font-weight:600;margin-bottom:6px}
+.agent-pill-desc{font-size:12px;color:var(--text3);line-height:1.5}
+.agent-pill-cat{margin-top:14px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--mint);letter-spacing:1.5px;text-transform:uppercase}
+.pricing{padding:160px 0;background:var(--bg2)}
+.pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:64px;border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.pc{background:var(--bg3);padding:44px;position:relative;transition:background .3s}
+.pc:hover{background:var(--bg2)}.pc.featured{background:linear-gradient(160deg,rgba(0,255,170,0.07),var(--bg3))}
+.pc-badge{position:absolute;top:20px;right:20px;background:var(--mint);color:#04040a;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;padding:4px 12px;border-radius:100px;letter-spacing:2px}
+.pc-tier{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-bottom:28px}
+.pc-price{font-family:'Bebas Neue',sans-serif;font-size:72px;line-height:1;letter-spacing:-2px;color:var(--text);margin-bottom:4px}
+.pc-price sup{font-size:28px;vertical-align:super;letter-spacing:0}
+.pc-price sub{font-size:18px;vertical-align:baseline;color:var(--text3);letter-spacing:0}
+.pc-desc{font-size:13px;color:var(--text3);margin-bottom:36px;line-height:1.6}
+.pc-divider{height:1px;background:var(--border);margin-bottom:28px}
+.pc-features{list-style:none;margin-bottom:36px}
+.pc-features li{font-size:13px;color:var(--text2);padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;align-items:center;gap:10px}
+.pc-features li:last-child{border:none}
+.pc-features li::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--mint);flex-shrink:0}
+.pc-btn{display:block;width:100%;padding:14px;border-radius:8px;font-weight:600;font-size:14px;text-align:center;text-decoration:none;transition:all .3s;font-family:'DM Sans',sans-serif}
+.pc-btn.outline{border:1px solid var(--border);color:var(--text2);background:transparent}
+.pc-btn.outline:hover{border-color:var(--text3);color:var(--text)}
+.pc-btn.filled{background:var(--mint);color:#04040a}
+.pc-btn.filled:hover{background:var(--mint2);box-shadow:0 8px 32px rgba(0,255,170,0.25)}
+.final-cta{padding:200px 64px;text-align:center;background:var(--bg);border-top:1px solid var(--border);position:relative;overflow:hidden}
+.final-cta::before{content:'';position:absolute;bottom:-200px;left:50%;transform:translateX(-50%);width:800px;height:400px;background:radial-gradient(ellipse,rgba(0,255,170,0.08),transparent 70%);pointer-events:none}
+.final-cta h2{font-family:'Bebas Neue',sans-serif;font-size:clamp(60px,10vw,140px);line-height:.9;letter-spacing:-3px;margin-bottom:32px}
+.final-cta h2 span{color:var(--mint)}
+.final-cta p{font-size:18px;color:var(--text2);max-width:480px;margin:0 auto 48px;line-height:1.7}
+footer{padding:48px 64px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text3);background:var(--bg);position:relative;z-index:1}
+.footer-logo{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:3px;color:var(--text3)}
+.footer-links{display:flex;gap:28px}
+.footer-links a{color:var(--text3);text-decoration:none;transition:color .2s}
+.footer-links a:hover{color:var(--text2)}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--text3)}
+@media(max-width:900px){nav{padding:18px 24px}.nav-center{display:none}.hero{padding:100px 24px 80px}.hero-metrics{display:none}.container{padding:0 24px}.bento-grid{grid-template-columns:1fr}.bc-1,.bc-2,.bc-3,.bc-4,.bc-5,.bc-6,.bc-7{grid-column:span 1;grid-row:span 1}.features-sticky{grid-template-columns:1fr}.sticky-left{position:relative;top:0}.agent-scroll{padding:4px 24px 20px;margin:40px -24px 0}.pricing-grid{grid-template-columns:1fr}footer{flex-direction:column;gap:16px;text-align:center;padding:32px 24px}}
+</style>
+</head>
+<body>
+<canvas id="particle-canvas"></canvas>
+<div id="cursor"></div>
+<div id="cursor-follower"></div>
+<nav id="nav">
+  <a href="/" class="nav-logo">APEX SWARM</a>
+  <div class="nav-center">
+    <a href="#features">Features</a>
+    <a href="#agents">Agents</a>
+    <a href="#pricing">Pricing</a>
+    <a href="/demo">Demo</a>
+  </div>
+  <div class="nav-right">
+    <a href="/login" class="btn-ghost">Sign In</a>
+    <a href="/signup" class="btn-mint">Deploy Free</a>
+  </div>
+</nav>
+<section class="hero" id="hero">
+  <div class="hero-eyebrow"><div class="eyebrow-dot"></div>66+ Autonomous AI Agents &middot; Always On</div>
+  <h1 class="hero-title">
+    <span class="line"><span class="word">YOUR</span> <span class="word accent">AI</span></span>
+    <span class="line"><span class="word">WORKFORCE</span></span>
+    <span class="line"><span class="word accent">NEVER</span> <span class="word">SLEEPS</span></span>
+  </h1>
+  <p class="hero-sub">Deploy specialized AI agents that research, monitor, write, and analyze &mdash; 24/7 &mdash; alerting your team the moment something matters.</p>
+  <div class="hero-cta">
+    <a href="/signup" class="cta-primary">Start Deploying Free &rarr;</a>
+    <a href="/demo" class="cta-secondary">Watch Live Demo</a>
+  </div>
+  <div class="hero-metrics">
+    <div><div class="metric-val">66+</div><div class="metric-label">Specialists</div></div>
+    <div style="width:1px;height:40px;background:var(--border)"></div>
+    <div><div class="metric-val">24/7</div><div class="metric-label">Always On</div></div>
+    <div style="width:1px;height:40px;background:var(--border)"></div>
+    <div><div class="metric-val">60s</div><div class="metric-label">To Deploy</div></div>
+    <div style="width:1px;height:40px;background:var(--border)"></div>
+    <div><div class="metric-val">&#8734;</div><div class="metric-label">Scale</div></div>
+  </div>
+</section>
+<div class="marquee-wrap">
+  <div class="marquee-track">
+    <div class="marquee-item"><div class="dot"></div>Crypto Monitor</div>
+    <div class="marquee-item"><div class="dot"></div>Competitor Intel</div>
+    <div class="marquee-item"><div class="dot"></div>Research Analyst</div>
+    <div class="marquee-item"><div class="dot"></div>Lead Qualifier</div>
+    <div class="marquee-item"><div class="dot"></div>Financial Analyst</div>
+    <div class="marquee-item"><div class="dot"></div>Content Writer</div>
+    <div class="marquee-item"><div class="dot"></div>Social Monitor</div>
+    <div class="marquee-item"><div class="dot"></div>News Tracker</div>
+    <div class="marquee-item"><div class="dot"></div>SEO Auditor</div>
+    <div class="marquee-item"><div class="dot"></div>Code Reviewer</div>
+    <div class="marquee-item"><div class="dot"></div>Legal Researcher</div>
+    <div class="marquee-item"><div class="dot"></div>Email Strategist</div>
+    <div class="marquee-item"><div class="dot"></div>Crypto Monitor</div>
+    <div class="marquee-item"><div class="dot"></div>Competitor Intel</div>
+    <div class="marquee-item"><div class="dot"></div>Research Analyst</div>
+    <div class="marquee-item"><div class="dot"></div>Lead Qualifier</div>
+    <div class="marquee-item"><div class="dot"></div>Financial Analyst</div>
+    <div class="marquee-item"><div class="dot"></div>Content Writer</div>
+    <div class="marquee-item"><div class="dot"></div>Social Monitor</div>
+    <div class="marquee-item"><div class="dot"></div>News Tracker</div>
+    <div class="marquee-item"><div class="dot"></div>SEO Auditor</div>
+    <div class="marquee-item"><div class="dot"></div>Code Reviewer</div>
+    <div class="marquee-item"><div class="dot"></div>Legal Researcher</div>
+    <div class="marquee-item"><div class="dot"></div>Email Strategist</div>
+  </div>
+</div>
+<section class="bento" id="features">
+  <div class="container">
+    <div class="s-label">Platform</div>
+    <div class="s-title">A complete AI<br>operations layer</div>
+    <div class="bento-grid">
+      <div class="bento-card bc-1">
+        <div class="bento-big-num">66+</div>
+        <div class="bento-title" style="font-size:24px">Specialized AI Agents</div>
+        <div class="bento-desc" style="max-width:480px;font-size:14px;color:var(--text2)">Every agent is purpose-built with domain expertise and real tools. Deploy a full AI workforce in minutes, not months.</div>
+        <div class="bento-terminal">
+          <div class="bt-dim"># Deploy crypto monitor daemon</div>
+          <div><span class="bt-green">$</span> apex run crypto-monitor --daemon</div>
+          <div class="bt-green">&#10003; Daemon 01b3455e started</div>
+          <div class="bt-green">&#10003; Connecting to price feeds...</div>
+          <div class="bt-amber">&#9889; ALERT: BTC +8.4% &middot; Sent &#8594; Slack</div>
+        </div>
+      </div>
+      <div class="bento-card bc-2"><span class="bento-icon">&#9889;</span><div class="bento-title">Real-time Daemons</div><div class="bento-desc">Background workers that run continuously and fire alerts the instant thresholds are hit.</div><div class="bento-tag">always-on</div></div>
+      <div class="bento-card bc-3"><span class="bento-icon">&#128279;</span><div class="bento-title">Slack + Telegram</div><div class="bento-desc">Results stream directly into your existing workflow. No new apps to check.</div><div class="bento-tag">integrations</div></div>
+      <div class="bento-card bc-4"><span class="bento-icon">&#128197;</span><div class="bento-title">Smart Scheduling</div><div class="bento-desc">Cron-based or event-driven triggers. Run agents on your terms.</div><div class="bento-tag">automation</div></div>
+      <div class="bento-card bc-5"><span class="bento-icon">&#127970;</span><div class="bento-title">Team Workspaces</div><div class="bento-desc">Org-level accounts, invite-based onboarding, per-member API keys, and audit logs.</div><div class="bento-tag">enterprise</div></div>
+      <div class="bento-card bc-6"><span class="bento-icon">&#129504;</span><div class="bento-title">Swarm Memory</div><div class="bento-desc">Agents share a knowledge layer &mdash; research from one feeds context to the next.</div><div class="bento-tag">intelligence</div></div>
+      <div class="bento-card bc-7"><span class="bento-icon">&#128202;</span><div class="bento-title">Live Mission Control</div><div class="bento-desc">God-eye dashboard showing every agent, every output, every alert in real time.</div><div class="bento-tag">visibility</div></div>
+    </div>
+  </div>
+</section>
+<section class="features-scroll" id="how">
+  <div class="container">
+    <div class="s-label">How It Works</div>
+    <div class="s-title">From idea to<br>autonomous agent</div>
+    <div class="features-sticky" style="margin-top:64px">
+      <div class="sticky-left">
+        <div id="featureList">
+          <div class="feature-item active" data-idx="0">
+            <div class="feature-num">01 &mdash;</div>
+            <div class="feature-title">Pick a specialist</div>
+            <div class="feature-desc">Browse 66+ purpose-built agents. Each one tuned for a specific job with real domain knowledge and tools.</div>
+          </div>
+          <div class="feature-item" data-idx="1">
+            <div class="feature-num">02 &mdash;</div>
+            <div class="feature-title">Give it a mission</div>
+            <div class="feature-desc">Describe the task in plain English. Set conditions, thresholds, and frequency. No code required.</div>
+          </div>
+          <div class="feature-item" data-idx="2">
+            <div class="feature-num">03 &mdash;</div>
+            <div class="feature-title">Watch it work</div>
+            <div class="feature-desc">Your agent executes in real time. Outputs stream to the dashboard. Alerts fire to Slack or Telegram instantly.</div>
+          </div>
+          <div class="feature-item" data-idx="3">
+            <div class="feature-num">04 &mdash;</div>
+            <div class="feature-title">Scale your workforce</div>
+            <div class="feature-desc">Run 50 daemons in parallel. Chain agents into pipelines. Build a fully autonomous operation.</div>
+          </div>
+        </div>
+      </div>
+      <div id="featureVisuals">
+        <div class="feature-visual show" data-idx="0">
+          <div class="fv-head"><div class="fv-dot" style="background:#ff5f57"></div><div class="fv-dot" style="background:#febc2e"></div><div class="fv-dot" style="background:#28c840"></div><div class="fv-tag">AGENT CATALOG</div></div>
+          <div class="fv-body" style="padding:28px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px"><div style="font-size:20px;margin-bottom:8px">&#8383;</div><div style="font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif">Crypto Monitor</div><div style="font-size:11px;color:var(--text3);font-family:'DM Sans',sans-serif;margin-top:4px">Price alerts, whale tracking</div></div>
+              <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px"><div style="font-size:20px;margin-bottom:8px">&#127919;</div><div style="font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif">Competitor Intel</div><div style="font-size:11px;color:var(--text3);font-family:'DM Sans',sans-serif;margin-top:4px">Track rival moves</div></div>
+              <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px"><div style="font-size:20px;margin-bottom:8px">&#128300;</div><div style="font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif">Research Analyst</div><div style="font-size:11px;color:var(--text3);font-family:'DM Sans',sans-serif;margin-top:4px">Deep web research</div></div>
+              <div style="background:var(--mintglow);border:1px solid rgba(0,255,170,0.2);border-radius:8px;padding:16px"><div style="font-size:20px;margin-bottom:8px">+63</div><div style="font-size:13px;font-weight:600;font-family:'DM Sans',sans-serif;color:var(--mint)">More Agents</div><div style="font-size:11px;color:var(--mint);opacity:.6;font-family:'DM Sans',sans-serif;margin-top:4px">Browse all &#8594;</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-visual" data-idx="1">
+          <div class="fv-head"><div class="fv-dot" style="background:#ff5f57"></div><div class="fv-dot" style="background:#febc2e"></div><div class="fv-dot" style="background:#28c840"></div><div class="fv-tag">DEPLOY AGENT</div></div>
+          <div class="fv-body">
+            <div class="bt-dim"># Configure your mission</div>
+            <div><span class="bt-green">agent:</span> crypto-monitor</div>
+            <div><span class="bt-green">task:</span> Alert when BTC moves 5%+ in any hour</div>
+            <div><span class="bt-green">schedule:</span> every 15 minutes</div>
+            <div><span class="bt-green">output:</span> slack #trading-alerts</div>
+            <br>
+            <div style="color:var(--mint)">&#10003; Mission queued &middot; Starting in 3s...</div>
+          </div>
+        </div>
+        <div class="feature-visual" data-idx="2">
+          <div class="fv-head"><div class="fv-dot" style="background:#ff5f57"></div><div class="fv-dot" style="background:#febc2e"></div><div class="fv-dot" style="background:#28c840"></div><div class="fv-tag">LIVE FEED</div></div>
+          <div class="fv-body">
+            <div class="bt-dim">12:04:22 &mdash; crypto-monitor</div>
+            <div style="color:var(--amber)">&#9889; BTC: $67,420 &#8594; +8.2% (2h)</div>
+            <div style="color:var(--mint)">&rarr; Sent to Slack #trading</div>
+            <div class="bt-dim">12:04:31 &mdash; competitor-intel</div>
+            <div style="color:var(--text)">&#128204; Competitor updated pricing</div>
+            <div style="color:var(--mint)">&rarr; Sent to Telegram</div>
+          </div>
+        </div>
+        <div class="feature-visual" data-idx="3">
+          <div class="fv-head"><div class="fv-dot" style="background:#ff5f57"></div><div class="fv-dot" style="background:#febc2e"></div><div class="fv-dot" style="background:#28c840"></div><div class="fv-tag">MISSION CONTROL</div></div>
+          <div class="fv-body" style="padding:20px">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px"><span style="font-size:12px;font-family:'DM Sans',sans-serif">crypto-monitor</span><span style="color:var(--mint);font-size:10px">&#9679; RUNNING</span></div>
+              <div style="display:flex;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px"><span style="font-size:12px;font-family:'DM Sans',sans-serif">competitor-intel</span><span style="color:var(--mint);font-size:10px">&#9679; RUNNING</span></div>
+              <div style="display:flex;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px"><span style="font-size:12px;font-family:'DM Sans',sans-serif">lead-qualifier</span><span style="color:var(--mint);font-size:10px">&#9679; RUNNING</span></div>
+              <div style="display:flex;justify-content:space-between;background:var(--mintglow);border:1px solid rgba(0,255,170,0.2);border-radius:6px;padding:10px 14px"><span style="font-size:12px;font-family:'DM Sans',sans-serif;color:var(--mint)">+ 47 more daemons</span><span style="color:var(--mint);font-size:10px">&#9679; ALL ACTIVE</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="agents" id="agents">
+  <div class="container">
+    <div class="s-label">The Workforce</div>
+    <div class="s-title">Your AI team,<br>ready to hire</div>
+  </div>
+  <div class="agent-scroll" id="agentScroll">
+    <div class="agent-pill"><div class="agent-pill-icon">&#8383;</div><div class="agent-pill-name">Crypto Monitor</div><div class="agent-pill-desc">Price alerts, whale tracking, market conditions 24/7</div><div class="agent-pill-cat">crypto &middot; finance</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#127919;</div><div class="agent-pill-name">Competitor Intel</div><div class="agent-pill-desc">Track pricing, product, and positioning changes</div><div class="agent-pill-cat">strategy &middot; research</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#128300;</div><div class="agent-pill-name">Research Analyst</div><div class="agent-pill-desc">Deep research with web search and source synthesis</div><div class="agent-pill-cat">research &middot; analysis</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#9997;&#65039;</div><div class="agent-pill-name">Copywriter</div><div class="agent-pill-desc">Landing pages, ads, email sequences that convert</div><div class="agent-pill-cat">content &middot; marketing</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#128202;</div><div class="agent-pill-name">Financial Analyst</div><div class="agent-pill-desc">Market analysis, earnings research, investment memos</div><div class="agent-pill-cat">finance &middot; analysis</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#127942;</div><div class="agent-pill-name">Lead Qualifier</div><div class="agent-pill-desc">Research and score leads against your ICP</div><div class="agent-pill-cat">sales &middot; research</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#128240;</div><div class="agent-pill-name">News Monitor</div><div class="agent-pill-desc">Track industry news and surface what matters</div><div class="agent-pill-cat">monitoring &middot; news</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#9878;&#65039;</div><div class="agent-pill-name">Legal Researcher</div><div class="agent-pill-desc">Regulatory changes, compliance alerts</div><div class="agent-pill-cat">legal &middot; compliance</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#128269;</div><div class="agent-pill-name">SEO Auditor</div><div class="agent-pill-desc">Keyword tracking, SERP monitoring, content gaps</div><div class="agent-pill-cat">seo &middot; growth</div></div>
+    <div class="agent-pill"><div class="agent-pill-icon">&#128101;</div><div class="agent-pill-name">Social Monitor</div><div class="agent-pill-desc">Brand mentions, sentiment tracking, viral alerts</div><div class="agent-pill-cat">social &middot; monitoring</div></div>
+    <div class="agent-pill" style="background:var(--mintglow);border-color:rgba(0,255,170,0.2)"><div class="agent-pill-icon">+</div><div class="agent-pill-name" style="color:var(--mint)">56 More Agents</div><div class="agent-pill-desc" style="color:var(--mint);opacity:.7">Browse the full catalog after signing up</div><div class="agent-pill-cat" style="color:var(--mint)">all categories</div></div>
+  </div>
+</section>
+<section class="pricing" id="pricing">
+  <div class="container">
+    <div class="s-label">Pricing</div>
+    <div class="s-title">Simple, scalable<br>pricing</div>
+    <div class="pricing-grid">
+      <div class="pc">
+        <div class="pc-tier">Starter</div>
+        <div class="pc-price"><sup>$</sup>49<sub>/mo</sub></div>
+        <div class="pc-desc">For individuals getting started with AI automation.</div>
+        <div class="pc-divider"></div>
+        <ul class="pc-features"><li>25 agent runs per day</li><li>1 background worker</li><li>3 scheduled tasks</li><li>Telegram alerts</li><li>All 66+ agent types</li><li>API access</li></ul>
+        <a href="/signup" class="pc-btn outline">Get Started</a>
+      </div>
+      <div class="pc featured">
+        <div class="pc-badge">POPULAR</div>
+        <div class="pc-tier">Pro</div>
+        <div class="pc-price"><sup>$</sup>199<sub>/mo</sub></div>
+        <div class="pc-desc">For teams that need more power and collaboration.</div>
+        <div class="pc-divider"></div>
+        <ul class="pc-features"><li>100 agent runs per day</li><li>5 background workers</li><li>10 scheduled tasks</li><li>Slack + Telegram alerts</li><li>5 team seats</li><li>Priority execution</li><li>Workflow automation</li></ul>
+        <a href="/signup" class="pc-btn filled">Start Free Trial</a>
+      </div>
+      <div class="pc">
+        <div class="pc-tier">Enterprise</div>
+        <div class="pc-price"><sup>$</sup>999<sub>/mo</sub></div>
+        <div class="pc-desc">Full AI workforce with enterprise-grade security.</div>
+        <div class="pc-divider"></div>
+        <ul class="pc-features"><li>Unlimited agent runs</li><li>50 background workers</li><li>Unlimited schedules</li><li>All output channels</li><li>Unlimited team seats</li><li>SSO + Audit logs</li><li>Dedicated SLA support</li></ul>
+        <a href="mailto:sales@apexswarm.ai" class="pc-btn outline">Contact Sales</a>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="final-cta">
+  <div class="s-label" style="justify-content:center">Ready to deploy</div>
+  <h2>HIRE YOUR<br><span>AI WORKFORCE</span><br>TODAY</h2>
+  <p>Start free. Deploy your first agent in 60 seconds. No credit card required.</p>
+  <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+    <a href="/signup" class="cta-primary" style="font-size:16px;padding:18px 48px">Deploy Free &rarr;</a>
+    <a href="/demo" class="cta-secondary" style="font-size:16px;padding:18px 48px">Live Demo</a>
+  </div>
+</section>
+<footer>
+  <div class="footer-logo">APEX SWARM</div>
+  <div class="footer-links">
+    <a href="#features">Features</a>
+    <a href="#pricing">Pricing</a>
+    <a href="/demo">Demo</a>
+    <a href="/signup">Sign Up</a>
+    <a href="/login">Sign In</a>
+  </div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px">v4.0.0 &middot; LIVE</div>
+</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+<script>
+gsap.registerPlugin(ScrollTrigger);
+const canvas=document.getElementById('particle-canvas');
+const ctx=canvas.getContext('2d');
+let W,H,particles=[];
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight}
+resize();window.addEventListener('resize',resize);
+class Particle{
+  constructor(){this.reset(true)}
+  reset(init){this.x=Math.random()*W;this.y=init?Math.random()*H:H+10;this.size=Math.random()*1.5+.3;this.speedY=-(Math.random()*.4+.1);this.speedX=(Math.random()-.5)*.15;this.opacity=Math.random()*.5+.1;this.life=0;this.maxLife=Math.random()*300+200}
+  update(){this.x+=this.speedX;this.y+=this.speedY;this.life++;if(this.life>this.maxLife)this.reset(false)}
+  draw(){const fade=Math.min(this.life/40,1)*Math.min((this.maxLife-this.life)/40,1);ctx.globalAlpha=this.opacity*fade;ctx.fillStyle='#00ffaa';ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);ctx.fill()}
+}
+for(let i=0;i<120;i++)particles.push(new Particle());
+function animCanvas(){ctx.clearRect(0,0,W,H);particles.forEach(p=>{p.update();p.draw()});requestAnimationFrame(animCanvas)}
+animCanvas();
+const cur=document.getElementById('cursor');
+const fol=document.getElementById('cursor-follower');
+let mx=0,my=0,fx=0,fy=0;
+document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;cur.style.left=mx+'px';cur.style.top=my+'px'});
+(function animCursor(){fx+=(mx-fx)*.12;fy+=(my-fy)*.12;fol.style.left=fx+'px';fol.style.top=fy+'px';requestAnimationFrame(animCursor)})();
+document.querySelectorAll('a,button,.bento-card,.agent-pill').forEach(el=>{
+  el.addEventListener('mouseenter',()=>{cur.style.width='16px';cur.style.height='16px';fol.style.width='48px';fol.style.height='48px';fol.style.borderColor='rgba(0,255,170,0.6)'});
+  el.addEventListener('mouseleave',()=>{cur.style.width='8px';cur.style.height='8px';fol.style.width='32px';fol.style.height='32px';fol.style.borderColor='rgba(0,255,170,0.4)'});
+});
+window.addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',window.scrollY>60));
+const tl=gsap.timeline({delay:.1});
+tl.to('.hero-eyebrow',{opacity:1,y:0,duration:.7,ease:'power3.out'})
+  .to('.hero-title .word',{y:0,opacity:1,duration:.9,ease:'power4.out',stagger:.08},'-=.3')
+  .to('.hero-sub',{opacity:1,y:0,duration:.7,ease:'power3.out'},'-=.4')
+  .to('.hero-cta',{opacity:1,y:0,duration:.6,ease:'power3.out'},'-=.4')
+  .to('.hero-metrics',{opacity:1,y:0,duration:.6,ease:'power3.out'},'-=.3');
+gsap.from('.bento-card',{opacity:0,y:40,duration:.8,stagger:.06,ease:'power3.out',scrollTrigger:{trigger:'.bento-grid',start:'top 80%'}});
+document.querySelectorAll('.bento-card').forEach(card=>{
+  card.addEventListener('mousemove',e=>{const r=card.getBoundingClientRect();card.style.setProperty('--mx',((e.clientX-r.left)/r.width*100)+'%');card.style.setProperty('--my',((e.clientY-r.top)/r.height*100)+'%')});
+});
+const featureItems=document.querySelectorAll('.feature-item');
+const featureVisuals=document.querySelectorAll('.feature-visual');
+featureItems.forEach(item=>{
+  item.addEventListener('click',()=>{
+    const idx=item.dataset.idx;
+    featureItems.forEach(f=>f.classList.remove('active'));
+    featureVisuals.forEach(v=>{v.classList.remove('show');v.style.display='none'});
+    item.classList.add('active');
+    const vis=document.querySelector('.feature-visual[data-idx="'+idx+'"]');
+    vis.style.display='block';requestAnimationFrame(()=>vis.classList.add('show'));
+  });
+});
+let fi=0;
+setInterval(()=>{
+  fi=(fi+1)%4;
+  featureItems.forEach(f=>f.classList.remove('active'));
+  featureVisuals.forEach(v=>{v.classList.remove('show');v.style.display='none'});
+  featureItems[fi].classList.add('active');
+  const vis=document.querySelector('.feature-visual[data-idx="'+fi+'"]');
+  vis.style.display='block';requestAnimationFrame(()=>vis.classList.add('show'));
+},3000);
+gsap.from('.agent-pill',{opacity:0,x:40,duration:.7,stagger:.05,ease:'power3.out',scrollTrigger:{trigger:'#agentScroll',start:'top 85%'}});
+gsap.from('.pc',{opacity:0,y:48,duration:.8,stagger:.1,ease:'power3.out',scrollTrigger:{trigger:'.pricing-grid',start:'top 80%'}});
+gsap.utils.toArray('.s-label,.s-title').forEach(el=>{gsap.from(el,{opacity:0,y:32,duration:.7,ease:'power3.out',scrollTrigger:{trigger:el,start:'top 88%'}})});
+gsap.from('.final-cta h2',{opacity:0,y:60,duration:1,ease:'power4.out',scrollTrigger:{trigger:'.final-cta',start:'top 75%'}});
+gsap.from('.final-cta p,.final-cta .cta-primary,.final-cta .cta-secondary',{opacity:0,y:32,duration:.7,stagger:.1,ease:'power3.out',scrollTrigger:{trigger:'.final-cta',start:'top 70%'}});
+</script>
+</body>
+</html>"""
 
 LOGIN_HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -3905,7 +5540,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
 .nav-btn.active .icon{opacity:1}
 .nav-badge{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:9px;background:var(--mint);color:var(--bg);padding:2px 7px;border-radius:8px;font-weight:600}
 
-.sidebar-footer{margin-top:auto;padding:16px 24px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sidebar-footer{margin-top:auto;padding:16px 24px;border-top:1px solid var(--border);display:flex;flex-direction:column;align-items:stretch;gap:8px}
 .pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 12px var(--mintglow);animation:breathe 3s ease infinite}
 @keyframes breathe{0%,100%{opacity:1;box-shadow:0 0 12px var(--mintglow)}50%{opacity:0.5;box-shadow:0 0 4px var(--mintglow)}}
 .sidebar-status{font-size:11px;color:var(--text2)}
@@ -4057,7 +5692,9 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
       <div class="nav-btn" data-p="settings" onclick="go('settings')"><span class="icon">◎</span> System</div>
     </div>
 
-    <div class="sidebar-footer">
+    <div class="nav-btn" data-p="admin" onclick="go('admin')"><span class="icon">&#9881;</span> Admin</div>
+      <div class="sidebar-footer" style="flex-direction:column;align-items:stretch;gap:8px">
+      <button onclick="signOut()" style="background:none;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px 14px;color:var(--text3);font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s" onmouseover="this.style.color='var(--rose)';this.style.borderColor='var(--rose)'" onmouseout="this.style.color='var(--text3)';this.style.borderColor='rgba(255,255,255,0.08)'">&#8594; Sign Out</button>
       <div class="pulse-dot"></div>
       <div class="sidebar-status"><span>Live</span> · v__VERSION__</div>
     </div>
@@ -4103,7 +5740,7 @@ function go(p) {
   page = p;
   $$('.nav-btn').forEach(n => n.classList.toggle('active', n.dataset.p === p));
   $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
-  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings};
+  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,admin:pAdmin,admin:pAdmin,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings};
   (R[p]||pOverview)();
 }
 
@@ -4246,121 +5883,309 @@ async function doA2A() {
 
 // ─── DAEMONS ──────────────────────────
 async function pSwarm() {
-  const [daemonRes, evtRes, agentRes] = await Promise.all([
-    api('/api/v1/daemons'),
-    api('/api/v1/events?limit=30'),
-    api('/api/v1/agents/recent')
-  ]);
+  const [daemonRes, evtRes] = await Promise.all([api('/api/v1/daemons'), api('/api/v1/events?limit=50')]);
   const daemons = daemonRes.daemons || [];
   const evts = (evtRes.events || []).filter(e => e.event_type);
-  const agents = agentRes.agents || [];
   const running = daemons.filter(d => d.status === 'running');
   const alerts = evts.filter(e => e.event_type === 'daemon.alert');
+  const css = [
+    '.sw{display:grid;grid-template-columns:1fr 300px;height:calc(100vh - 60px);overflow:hidden}',
+    '.sw-c{position:relative;background:radial-gradient(ellipse at 50% 50%,#0a0f1a,#050508);overflow:hidden;border-right:1px solid var(--border)}',
+    '.sw-c canvas{position:absolute;inset:0;width:100%;height:100%}',
+    '.sw-hud{position:absolute;top:16px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:flex-start;z-index:10;pointer-events:none}',
+    '.sw-title{font-family:IBM Plex Mono,monospace;font-size:10px;letter-spacing:3px;color:var(--mint);background:rgba(0,0,0,.7);padding:8px 14px;border:1px solid rgba(0,255,170,.15);border-radius:6px}',
+    '.sw-mm{display:flex;gap:8px}',
+    '.sw-m{background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.06);border-radius:6px;padding:8px 12px;text-align:center}',
+    '.sw-mv{font-size:18px;font-weight:700;color:var(--mint);font-family:IBM Plex Mono,monospace;line-height:1}',
+    '.sw-ml{font-size:9px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-top:2px}',
+    '.sw-s{display:flex;flex-direction:column;background:var(--bg2);overflow:hidden}',
+    '.sw-tabs{display:flex;border-bottom:1px solid var(--border)}',
+    '.sw-tab{flex:1;padding:11px;text-align:center;font-size:11px;font-weight:600;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}',
+    '.sw-tab.active{color:var(--mint);border-bottom-color:var(--mint)}',
+    '.sw-p{flex:1;overflow-y:auto;padding:14px;display:none}',
+    '.sw-p.active{display:block}',
+    '.sw-p::-webkit-scrollbar{width:3px}.sw-p::-webkit-scrollbar-thumb{background:var(--border)}',
+    '.dnc{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:9px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}',
+    '.dnc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--mint)}',
+    '.dnc:hover{border-color:rgba(0,255,170,.2);transform:translateX(2px)}',
+    '.dnc-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}',
+    '.dnc-n{font-size:13px;font-weight:600}.dnc-s{font-size:9px;letter-spacing:1.5px;color:var(--mint);font-family:IBM Plex Mono,monospace}',
+    '.dnc-t{font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:7px}',
+    '.dnc-m{display:flex;gap:10px;font-size:10px;color:var(--text3);font-family:IBM Plex Mono,monospace}',
+    '.dnc-stop{position:absolute;top:10px;right:10px;background:rgba(255,60,90,.1);border:1px solid rgba(255,60,90,.2);color:var(--rose);font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer}',
+    '.ei{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03)}',
+    '.ed{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:5px}',
+    '.eb{flex:1;min-width:0}',
+    '.et{display:flex;align-items:center;gap:5px;margin-bottom:2px}',
+    '.en{font-size:11px;font-weight:600;color:var(--text)}.ety{font-size:9px;color:var(--text3);font-family:IBM Plex Mono,monospace}',
+    '.em{font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.etm{font-size:9px;color:var(--text3);font-family:IBM Plex Mono,monospace;margin-top:1px}',
+    '.dep-btn{width:100%;padding:13px;background:var(--mint);color:#04040a;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px}'
+  ].join('');
 
-  $('#main').innerHTML = `<div class="page fade-up">
-    <div class="page-header">
-      <div class="page-title">⬡ Live Swarm</div>
-      <div class="page-subtitle">${running.length} active daemons · ${agents.filter(a=>a.status==='running').length} agents running · ${alerts.length} alerts today</div>
-    </div>
+  let workersHtml = `<button class="dep-btn" onclick="swarmDeploy()">+ Deploy Worker</button>`;
+  if (running.length) {
+    running.forEach(d => {
+      workersHtml += `<div class="dnc" onclick="swarmFocus('${d.daemon_id}')">
+        <button class="dnc-stop" onclick="event.stopPropagation();stopDaemon('${d.daemon_id}')">Stop</button>
+        <div class="dnc-h"><div class="dnc-n">${d.agent_name}</div><div class="dnc-s">&#9679; LIVE</div></div>
+        <div class="dnc-t">${(d.task||'').slice(0,80)}</div>
+        <div class="dnc-m"><span>Cycle ${d.cycles||0}</span><span>Every ${d.interval_seconds}s</span></div>
+        </div>`;
+    });
+  } else {
+    workersHtml += `<div style="text-align:center;padding:40px 16px;color:var(--text3)"><div style="font-size:36px;margin-bottom:10px;opacity:.3">&#11041;</div><div style="font-size:12px">No active workers</div></div>`;
+  }
 
-    <div class="metrics" style="margin-bottom:20px">
-      <div class="metric-card"><div class="metric-val" style="color:var(--mint)">${running.length}</div><div class="metric-label">Active Daemons</div></div>
-      <div class="metric-card"><div class="metric-val" style="color:var(--amber)">${alerts.length}</div><div class="metric-label">Alerts Fired</div></div>
-      <div class="metric-card"><div class="metric-val" style="color:var(--violet)">${evts.filter(e=>e.event_type==='agent.completed').length}</div><div class="metric-label">Tasks Completed</div></div>
-      <div class="metric-card"><div class="metric-val" style="color:var(--text)">${evts.length}</div><div class="metric-label">Total Events</div></div>
-    </div>
+  let feedHtml = evts.length ? '' : `<div style="text-align:center;padding:40px;color:var(--text3);font-size:12px">No activity yet</div>`;
+  evts.slice().reverse().slice(0,30).forEach(e => {
+    const col = e.event_type.includes('alert') ? 'var(--amber)' : e.event_type.includes('fail') ? 'var(--rose)' : 'var(--mint)';
+    feedHtml += `<div class="ei"><div class="ed" style="background:${col}"></div><div class="eb">
+      <div class="et"><span class="en">${e.agent_name||'system'}</span><span class="ety">${e.event_type}</span></div>
+      <div class="em">${(e.message||'').slice(0,100)}</div>
+      <div class="etm">${new Date(e.timestamp||e.created_at).toLocaleTimeString()}</div>
+      </div></div>`;
+  });
 
-    <div class="g2">
-      <div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-head">
-            <div class="card-title">🤖 AI Workforce — Active</div>
-            <button class="btn btn-mint btn-sm" onclick="startDaemon()">+ Deploy Worker</button>
-          </div>
-          <div class="card-body">
-            ${running.length ? running.map(d => `
-              <div style="padding:14px;background:var(--bg);border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <div class="dot live" style="animation:pulse 2s infinite"></div>
-                    <span style="font-weight:600;font-size:14px">${d.agent_name}</span>
-                    <span style="font-size:11px;background:var(--mintbg);color:var(--mint);padding:2px 8px;border-radius:8px">${d.agent_type}</span>
-                  </div>
-                  <button class="btn btn-sm" style="color:var(--rose);font-size:11px" onclick="stopDaemon('${d.daemon_id}')">Stop</button>
-                </div>
-                <div style="font-size:12px;color:var(--text3);margin-bottom:6px">${d.task.slice(0,120)}...</div>
-                <div style="display:flex;gap:16px;font-size:11px;color:var(--text2)">
-                  <span>🔄 Cycle ${d.cycles}</span>
-                  <span>⏱ Every ${d.interval_seconds}s</span>
-                  <span>🕐 ${new Date(d.created_at).toLocaleTimeString()}</span>
-                </div>
-                ${d.last_result_preview ? `<div style="margin-top:8px;font-size:11px;color:var(--text2);background:var(--bg2);padding:8px;border-radius:6px;max-height:60px;overflow:hidden">${d.last_result_preview.slice(0,200)}</div>` : ''}
-              </div>`).join('') : `
-              <div style="text-align:center;padding:40px;color:var(--text3)">
-                <div style="font-size:32px;margin-bottom:12px">◌</div>
-                No active workers. Deploy your first AI worker.
-              </div>`}
-          </div>
+  let alertsHtml = alerts.length ? '' : `<div style="text-align:center;padding:40px;color:var(--text3);font-size:12px">No alerts &#10003;</div>`;
+  alerts.slice().reverse().forEach(e => {
+    alertsHtml += `<div style="background:rgba(255,180,0,.04);border:1px solid rgba(255,180,0,.12);border-radius:8px;padding:11px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;font-weight:600;color:var(--amber)">${e.agent_name}</span>
+      <span style="font-size:10px;color:var(--text3)">${new Date(e.timestamp||e.created_at).toLocaleTimeString()}</span></div>
+      <div style="font-size:11px;color:var(--text2)">${(e.message||'').slice(0,150)}</div></div>`;
+  });
+
+  const completedCount = evts.filter(e => e.event_type === 'agent.completed').length;
+  $('#main').innerHTML = `<div class="page fade-up" style="padding:0"><style>${css}</style>
+    <div class="sw">
+      <div class="sw-c"><canvas id="swarmCanvas"></canvas>
+        <div class="sw-hud"><div class="sw-title">&#11041; LIVE SWARM</div>
+          <div class="sw-mm">
+            <div class="sw-m"><div class="sw-mv">${running.length}</div><div class="sw-ml">Active</div></div>
+            <div class="sw-m"><div class="sw-mv" style="color:var(--amber)">${alerts.length}</div><div class="sw-ml">Alerts</div></div>
+            <div class="sw-m"><div class="sw-mv" style="color:var(--violet)">${completedCount}</div><div class="sw-ml">Done</div></div>
+          </div></div></div>
+      <div class="sw-s">
+        <div class="sw-tabs">
+          <div class="sw-tab active" onclick="swarmTab('workers',this)">Workers</div>
+          <div class="sw-tab" onclick="swarmTab('feed',this)">Feed</div>
+          <div class="sw-tab" onclick="swarmTab('alerts',this)">Alerts</div>
         </div>
-
-        <div class="card">
-          <div class="card-head"><div class="card-title">🚨 Recent Alerts</div></div>
-          <div class="card-body" style="max-height:250px;overflow-y:auto">
-            ${alerts.length ? alerts.slice().reverse().slice(0,10).map(e => `
-              <div style="padding:10px;background:rgba(255,180,0,0.05);border:1px solid rgba(255,180,0,0.15);border-radius:8px;margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-                  <span style="font-weight:600;font-size:12px;color:var(--amber)">${e.agent_name}</span>
-                  <span style="font-size:11px;color:var(--text3)">${new Date(e.timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div style="font-size:12px;color:var(--text2)">${(e.message||'').slice(0,150)}</div>
-              </div>`).join('') : '<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">No alerts — all clear ✓</div>'}
-          </div>
-        </div>
+        <div class="sw-p active" id="sw-workers">${workersHtml}</div>
+        <div class="sw-p" id="sw-feed">${feedHtml}</div>
+        <div class="sw-p" id="sw-alerts">${alertsHtml}</div>
       </div>
+    </div></div>`;
 
-      <div>
-        <div class="card" style="margin-bottom:16px">
-          <div class="card-head"><div class="card-title">⚡ Live Activity Stream</div></div>
-          <div class="card-body" id="swarmFeed" style="max-height:400px;overflow-y:auto">
-            ${evts.length ? evts.slice().reverse().map(e => `
-              <div class="event-item">
-                <div class="event-dot" style="background:${e.event_type?.includes('alert')?'var(--amber)':e.event_type?.includes('fail')?'var(--rose)':e.event_type?.includes('start')?'var(--violet)':'var(--mint)'}"></div>
-                <div class="event-content">
-                  <strong>${e.agent_name||e.agent_type||'system'}</strong>
-                  <span style="font-size:11px;color:var(--text3);margin-left:6px">${e.event_type}</span>
-                  <div style="color:var(--text2);font-size:12px;margin-top:2px">${(e.message||'').slice(0,120)}</div>
-                  <div class="event-time">${new Date(e.timestamp).toLocaleTimeString()}</div>
-                </div>
-              </div>`).join('') : '<div style="text-align:center;padding:20px;color:var(--text3)">Waiting for activity...</div>'}
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><div class="card-title">📤 Output Channels</div></div>
-          <div class="card-body">
-            <div class="agent-row" style="margin-bottom:8px">
-              <div class="dot ${evts.length ? 'live' : 'idle'}"></div>
-              <div class="agent-name">Telegram</div>
-              <span class="agent-badge badge-done">Connected</span>
-            </div>
-            <div class="agent-row" style="margin-bottom:8px">
-              <div class="dot idle" id="slackDot"></div>
-              <div class="agent-name">Slack</div>
-              <span class="agent-badge" id="slackBadge" style="cursor:pointer" onclick="configureSlack()">Configure →</span>
-            </div>
-            <div class="agent-row">
-              <div class="dot idle"></div>
-              <div class="agent-name">Email</div>
-              <span class="agent-badge">Coming Soon</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-
-  // Auto-refresh every 15s while on this page
+  initSwarmCanvas(running, evts);
   setTimeout(() => { if(page==='swarm') pSwarm(); }, 15000);
+}
+
+function swarmTab(name, el) {
+  document.querySelectorAll('.sw-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.sw-p').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('sw-'+name).classList.add('active');
+}
+
+function swarmFocus(id) {
+  if(window._swarmNodes) window._swarmNodes.forEach(n=>{n.focused=(n.id===id);});
+}
+
+function initSwarmCanvas(daemons, events) {
+  const canvas = document.getElementById('swarmCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth||800, H = canvas.offsetHeight||600;
+  canvas.width = W; canvas.height = H;
+  const cx = W/2, cy = H/2, orbitR = Math.min(W,H)*.28;
+  const HUB = {id:'hub',x:cx,y:cy,r:26,color:'#00ffaa',label:'APEX',type:'hub',pulse:0};
+  const nodes = [HUB];
+  daemons.forEach((d,i) => {
+    const a = (i/Math.max(daemons.length,1))*Math.PI*2-Math.PI/2;
+    nodes.push({id:d.daemon_id,x:cx+Math.cos(a)*(orbitR+(Math.random()-.5)*40),y:cy+Math.sin(a)*(orbitR+(Math.random()-.5)*40),r:15,color:d.cycles>5?'#00ffaa':'#a374ff',label:(d.agent_name||'').split(' ')[0],type:'daemon',pulse:Math.random()*Math.PI*2,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,focused:false});
+  });
+  window._swarmNodes = nodes;
+  const particles = [];
+  let frame = 0;
+  function draw() {
+    ctx.clearRect(0,0,W,H); frame++;
+    ctx.strokeStyle='rgba(0,255,170,.03)'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    nodes.filter(n=>n.type==='daemon').forEach(n=>{
+      const g=ctx.createLinearGradient(HUB.x,HUB.y,n.x,n.y);
+      g.addColorStop(0,'rgba(0,255,170,.2)'); g.addColorStop(1,'rgba(0,255,170,.03)');
+      ctx.strokeStyle=g; ctx.lineWidth=1; ctx.setLineDash([4,8]); ctx.lineDashOffset=-frame*.5;
+      ctx.beginPath(); ctx.moveTo(HUB.x,HUB.y); ctx.lineTo(n.x,n.y); ctx.stroke(); ctx.setLineDash([]);
+    });
+    for(let i=particles.length-1;i>=0;i--) {
+      const p=particles[i]; p.progress+=p.speed;
+      if(p.progress>=1){particles.splice(i,1);continue;}
+      ctx.globalAlpha=Math.sin(p.progress*Math.PI); ctx.fillStyle='#00ffaa';
+      ctx.beginPath(); ctx.arc(p.x+(p.tx-p.x)*p.progress, p.y+(p.ty-p.y)*p.progress, 2.5,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+    }
+    nodes.forEach(n=>{
+      n.pulse+=.04;
+      if(n.type==='daemon'){
+        n.x+=n.vx; n.y+=n.vy;
+        const dx=n.x-cx,dy=n.y-cy,dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist>orbitR+60){n.vx*=-.5;n.vy*=-.5;} if(dist<orbitR-60){n.vx+=dx*.001;n.vy+=dy*.001;}
+        n.vx*=.99; n.vy*=.99;
+      }
+      const gr=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,n.r*3);
+      gr.addColorStop(0,n.color==='#00ffaa'?'rgba(0,255,170,.12)':'rgba(163,116,255,.12)'); gr.addColorStop(1,'transparent');
+      ctx.fillStyle=gr; ctx.beginPath(); ctx.arc(n.x,n.y,n.r*3,0,Math.PI*2); ctx.fill();
+      if(n.type==='hub'||n.focused){ctx.strokeStyle=n.color+'33';ctx.lineWidth=1;ctx.beginPath();ctx.arc(n.x,n.y,n.r+10+Math.sin(n.pulse)*5,0,Math.PI*2);ctx.stroke();}
+      ctx.fillStyle=n.type==='hub'?'#04040a':'#0a0f1a'; ctx.strokeStyle=n.focused?'#fff':n.color; ctx.lineWidth=n.focused?2:1.5;
+      ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle=n.color; ctx.font=n.type==='hub'?'bold 9px IBM Plex Mono':'8px IBM Plex Mono'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(n.type==='hub'?'APEX':n.label.slice(0,4).toUpperCase(),n.x,n.y);
+      if(n.type==='daemon'){ctx.fillStyle=n.focused?'#fff':'rgba(255,255,255,.45)';ctx.font='8px sans-serif';ctx.fillText(n.label.slice(0,10),n.x,n.y+n.r+10);}
+    });
+    if(frame%90===0&&nodes.length>1){const s=nodes[1+Math.floor(Math.random()*(nodes.length-1))];particles.push({x:s.x,y:s.y,tx:HUB.x,ty:HUB.y,progress:0,speed:.015+Math.random()*.01});}
+    if(frame%130===0&&nodes.length>1){const s=nodes[1+Math.floor(Math.random()*(nodes.length-1))];particles.push({x:HUB.x,y:HUB.y,tx:s.x,ty:s.y,progress:0,speed:.015+Math.random()*.01});}
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+function swarmTab(name, el) {
+  document.querySelectorAll('.swarm-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.swarm-panel').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('swarm-'+name).classList.add('active');
+}
+
+function swarmFocusNode(id) {
+  if(window._swarmNodes) window._swarmNodes.forEach(n => { n.focused = (n.id === id); });
+}
+
+function initSwarmCanvas(daemons, events) {
+  const canvas = document.getElementById('swarmCanvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth||800, H = canvas.offsetHeight||600;
+  canvas.width = W; canvas.height = H;
+  const cx = W/2, cy = H/2;
+  const orbitR = Math.min(W,H)*0.28;
+  const nodes = [{id:'hub',x:cx,y:cy,r:28,color:'#00ffaa',label:'APEX',type:'hub',pulse:0,vx:0,vy:0}];
+  daemons.forEach((d,i) => {
+    const angle = (i/Math.max(daemons.length,1))*Math.PI*2-Math.PI/2;
+    nodes.push({id:d.daemon_id,x:cx+Math.cos(angle)*(orbitR+(Math.random()-.5)*40),y:cy+Math.sin(angle)*(orbitR+(Math.random()-.5)*40),r:16,color:d.cycles>5?'#00ffaa':'#a374ff',label:d.agent_name.split(' ')[0],type:'daemon',daemon:d,pulse:Math.random()*Math.PI*2,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,focused:false});
+  });
+  window._swarmNodes = nodes;
+  const HUB = nodes[0];
+  const particles = [];
+  let frame = 0;
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    frame++;
+    ctx.strokeStyle='rgba(0,255,170,0.03)';ctx.lineWidth=1;
+    for(let x=0;x<W;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+    for(let y=0;y<H;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+    nodes.filter(n=>n.type==='daemon').forEach(n=>{
+      const grad=ctx.createLinearGradient(HUB.x,HUB.y,n.x,n.y);
+      grad.addColorStop(0,'rgba(0,255,170,0.25)');grad.addColorStop(1,'rgba(0,255,170,0.04)');
+      ctx.strokeStyle=grad;ctx.lineWidth=1;ctx.setLineDash([4,8]);ctx.lineDashOffset=-frame*.5;
+      ctx.beginPath();ctx.moveTo(HUB.x,HUB.y);ctx.lineTo(n.x,n.y);ctx.stroke();ctx.setLineDash([]);
+    });
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];p.progress+=p.speed;
+      if(p.progress>=1){particles.splice(i,1);continue}
+      const x=p.x+(p.tx-p.x)*p.progress,y=p.y+(p.ty-p.y)*p.progress;
+      ctx.globalAlpha=Math.sin(p.progress*Math.PI);ctx.fillStyle='#00ffaa';
+      ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+    }
+    nodes.forEach(n=>{
+      n.pulse+=0.04;
+      if(n.type==='daemon'){
+        n.x+=n.vx;n.y+=n.vy;
+        const dx=n.x-cx,dy=n.y-cy,dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist>orbitR+60){n.vx*=-.5;n.vy*=-.5}
+        if(dist<orbitR-60){n.vx+=dx*.001;n.vy+=dy*.001}
+        n.vx*=.99;n.vy*=.99;
+      }
+      const gR=n.r+8+Math.sin(n.pulse)*4;
+      const glow=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,gR*2.5);
+      glow.addColorStop(0,n.color==='#00ffaa'?'rgba(0,255,170,0.15)':'rgba(163,116,255,0.15)');glow.addColorStop(1,'transparent');
+      ctx.fillStyle=glow;ctx.beginPath();ctx.arc(n.x,n.y,gR*2.5,0,Math.PI*2);ctx.fill();
+      if(n.type==='hub'||n.focused){ctx.strokeStyle=n.color+'44';ctx.lineWidth=1;ctx.beginPath();ctx.arc(n.x,n.y,n.r+12+Math.sin(n.pulse)*6,0,Math.PI*2);ctx.stroke()}
+      ctx.fillStyle=n.type==='hub'?'#04040a':'#0a0f1a';ctx.strokeStyle=n.focused?'#fff':n.color;ctx.lineWidth=n.focused?2:1.5;
+      ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.fillStyle=n.color;ctx.font=n.type==='hub'?'bold 10px IBM Plex Mono':'9px IBM Plex Mono';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(n.type==='hub'?'APEX':n.label.slice(0,4).toUpperCase(),n.x,n.y);
+      if(n.type==='daemon'){ctx.fillStyle=n.focused?'#fff':'rgba(255,255,255,0.5)';ctx.font='9px sans-serif';ctx.fillText(n.label.slice(0,12),n.x,n.y+n.r+12)}
+    });
+    if(frame%90===0&&daemons.length){const src=nodes[1+Math.floor(Math.random()*(nodes.length-1))];if(src)particles.push({x:src.x,y:src.y,tx:HUB.x,ty:HUB.y,progress:0,speed:.015+Math.random()*.01})}
+    if(frame%120===0&&daemons.length){const src=nodes[1+Math.floor(Math.random()*(nodes.length-1))];if(src)particles.push({x:HUB.x,y:HUB.y,tx:src.x,ty:src.y,progress:0,speed:.015+Math.random()*.01})}
+    requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+async function pAdmin() {
+  const [usersRes, evtRes, daemonRes] = await Promise.all([
+    api('/api/v1/admin/users'),
+    api('/api/v1/events?limit=100'),
+    api('/api/v1/daemons')
+  ]);
+  const users = usersRes.users || [];
+  const evts = evtRes.events || [];
+  const daemons = daemonRes.daemons || [];
+  const totalAlerts = evts.filter(e=>e.event_type==='daemon.alert').length;
+  const tiers = {free:0,starter:0,pro:0,enterprise:0};
+  users.forEach(u => { tiers[u.tier||'free'] = (tiers[u.tier||'free']||0)+1; });
+  const mrr = (tiers.starter*49)+(tiers.pro*199)+(tiers.enterprise*999);
+
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<style>'
+    + '.admin-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}'
+    + '.admin-stat{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;position:relative;overflow:hidden}'
+    + '.admin-stat::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:var(--mint)}'
+    + '.admin-stat.amber::before{background:var(--amber)}.admin-stat.violet::before{background:var(--violet)}.admin-stat.rose::before{background:var(--rose)}'
+    + '.admin-stat-val{font-size:32px;font-weight:700;letter-spacing:-1px;margin-bottom:4px}'
+    + '.admin-stat-label{font-size:11px;color:var(--text3);letter-spacing:.5px;text-transform:uppercase}'
+    + '.admin-table{width:100%;border-collapse:collapse;font-size:13px}'
+    + '.admin-table th{padding:10px 14px;text-align:left;font-size:10px;letter-spacing:1.5px;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);font-weight:500}'
+    + '.admin-table td{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--text2)}'
+    + '.admin-table tr:hover td{background:rgba(255,255,255,0.02)}'
+    + '.tier-pill{display:inline-block;padding:2px 8px;border-radius:100px;font-size:10px;font-weight:600;letter-spacing:.5px;font-family:"IBM Plex Mono",monospace}'
+    + '.tier-free{background:rgba(255,255,255,0.06);color:var(--text3)}.tier-starter{background:rgba(96,165,250,0.1);color:#60a5fa}.tier-pro{background:rgba(163,116,255,0.1);color:var(--violet)}.tier-enterprise{background:rgba(0,255,170,0.08);color:var(--mint)}'
+    + '.admin-action{background:none;border:1px solid var(--border);color:var(--text3);font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer;font-family:"IBM Plex Mono",monospace;transition:all .2s}'
+    + '.admin-action:hover{border-color:var(--text2);color:var(--text)}.admin-action.danger:hover{border-color:var(--rose);color:var(--rose)}'
+    + '</style>'
+    + '<div class="page-header"><div class="page-title">&#9881; Admin</div><div class="page-subtitle">' + users.length + ' users &middot; $' + mrr.toLocaleString() + ' MRR</div></div>'
+    + '<div class="admin-grid">'
+    + '<div class="admin-stat"><div class="admin-stat-val" style="color:var(--mint)">' + users.length + '</div><div class="admin-stat-label">Total Users</div></div>'
+    + '<div class="admin-stat amber"><div class="admin-stat-val" style="color:var(--amber)">$' + mrr.toLocaleString() + '</div><div class="admin-stat-label">MRR</div></div>'
+    + '<div class="admin-stat violet"><div class="admin-stat-val" style="color:var(--violet)">' + daemons.length + '</div><div class="admin-stat-label">Daemons</div></div>'
+    + '<div class="admin-stat rose"><div class="admin-stat-val" style="color:var(--rose)">' + totalAlerts + '</div><div class="admin-stat-label">Alerts</div></div>'
+    + '</div>'
+    + '<div class="card"><div class="card-head"><div class="card-title">Users</div>'
+    + '<div style="font-size:11px;color:var(--text3);font-family:\'IBM Plex Mono\',monospace;display:flex;gap:12px">'
+    + '<span>Free: ' + tiers.free + '</span><span style="color:#60a5fa">Starter: ' + tiers.starter + '</span><span style="color:var(--violet)">Pro: ' + tiers.pro + '</span><span style="color:var(--mint)">Ent: ' + tiers.enterprise + '</span>'
+    + '</div></div>'
+    + '<div style="overflow-x:auto"><table class="admin-table"><thead><tr><th>Email</th><th>Tier</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead><tbody>'
+    + (users.length ? users.slice(0,50).map(u =>
+        '<tr><td style="color:var(--text)">' + u.email + '</td>'
+        + '<td><span class="tier-pill tier-' + (u.tier||'free') + '">' + (u.tier||'FREE').toUpperCase() + '</span></td>'
+        + '<td>' + (u.created_at ? new Date(u.created_at).toLocaleDateString() : '—') + '</td>'
+        + '<td><span style="color:' + (u.active!==0?'var(--mint)':'var(--rose)') + '">&#9679; ' + (u.active!==0?'Active':'Suspended') + '</span></td>'
+        + '<td style="display:flex;gap:6px"><button class="admin-action" onclick="adminUpgrade(\'' + u.id + '\',\'pro\')">&#8593; Pro</button>'
+        + '<button class="admin-action danger" onclick="adminSuspend(\'' + u.id + '\')">Suspend</button></td></tr>').join('')
+      : '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text3)">No users yet</td></tr>')
+    + '</tbody></table></div></div></div>';
+}
+
+async function adminUpgrade(userId, tier) {
+  const r = await api('/api/v1/admin/users/'+userId+'/tier', {method:'POST', body:JSON.stringify({tier})});
+  pAdmin();
+}
+async function adminSuspend(userId) {
+  if(!confirm('Suspend this user?')) return;
+  await api('/api/v1/admin/users/'+userId+'/suspend', {method:'POST'});
+  pAdmin();
 }
 
 async function startDaemon() {
@@ -4382,6 +6207,222 @@ async function configureSlack() {
     alert('✅ Slack configured! Check your channel for a test message.');
     pSwarm();
   }
+}
+
+async function stopDaemon(id) {
+  await api('/api/v1/daemons/'+id,{method:'DELETE'});
+  pSwarm();
+}
+
+async function pTeam() {
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9712; Team</div><div class="page-subtitle">Manage org access and team members</div></div>'
+    + '<div class="g2">'
+    + '<div class="card"><div class="card-head"><div class="card-title">Create Organization</div></div><div class="card-body">'
+    + '<label class="lbl">Org Name</label><input class="input" id="oName" placeholder="Acme Corp"><br>'
+    + '<label class="lbl">Slug</label><input class="input" id="oSlug" placeholder="acme-corp"><br>'
+    + '<label class="lbl">Owner Email</label><input class="input" id="oEmail" placeholder="admin@acme.com"><br>'
+    + '<label class="lbl">Slack Webhook (optional)</label><input class="input" id="oSlack" placeholder="https://hooks.slack.com/..."><br>'
+    + '<button class="btn btn-mint" style="margin-top:12px" onclick="createOrg()">Create</button>'
+    + '<div id="orgRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
+    + '<div class="card"><div class="card-head"><div class="card-title">Invite Team Member</div></div><div class="card-body">'
+    + '<label class="lbl">Org ID</label><input class="input" id="iOrg" placeholder="org-id"><br>'
+    + '<label class="lbl">Email</label><input class="input" id="iEmail" placeholder="teammate@acme.com"><br>'
+    + '<label class="lbl">Role</label><select class="input" id="iRole"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select><br>'
+    + '<button class="btn btn-mint" style="margin-top:12px" onclick="inviteMember()">Send Invite</button>'
+    + '<div id="invRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
+    + '</div>'
+    + '<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">Accept Invite</div></div><div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap">'
+    + '<input class="input" id="aTok" placeholder="Invite token" style="flex:1;min-width:180px">'
+    + '<input class="input" id="aEmail" placeholder="Your email" style="flex:1;min-width:180px">'
+    + '<button class="btn btn-mint" onclick="acceptInvite()">Accept</button></div>'
+    + '<div id="accRes" style="padding:0 20px 16px;font-size:12px;color:var(--mint)"></div></div>'
+    + '</div>';
+}
+
+async function createOrg() {
+  const r = await api('/api/v1/orgs',{method:'POST',body:JSON.stringify({name:$('#oName').value,slug:$('#oSlug').value,owner_email:$('#oEmail').value,slack_webhook:$('#oSlack').value})});
+  $('#orgRes').innerHTML = r.org_id ? "Created! Org ID: "+r.org_id+"<br>API Key: "+r.owner_api_key : "Error: "+(r.detail||JSON.stringify(r));
+  if(r.org_id) $('#iOrg').value = r.org_id;
+}
+
+async function inviteMember() {
+  const r = await api('/api/v1/orgs/'+$('#iOrg').value+'/invite',{method:'POST',body:JSON.stringify({email:$('#iEmail').value,role:$('#iRole').value})});
+  $('#invRes').innerHTML = r.invite_url ? 'Invite URL: <a href="'+r.invite_url+'" style="color:var(--mint)">'+r.invite_url+'</a>' : "Error: "+(r.detail||JSON.stringify(r));
+}
+
+async function acceptInvite() {
+  const r = await api('/api/v1/orgs/accept-invite',{method:'POST',body:JSON.stringify({token:$('#aTok').value,email:$('#aEmail').value})});
+  $('#accRes').textContent = r.api_key ? "API Key: "+r.api_key : "Error: "+(r.detail||JSON.stringify(r));
+}
+
+function filterAudit(q){document.querySelectorAll('.ar').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?"":"none");}
+
+async function pAudit() {
+  const r = await api('/api/v1/audit/logs?limit=100');
+  const logs = r.logs || [];
+  const ac = a => a.includes("fail")||a.includes("error")?"var(--rose)":a.includes("login")||a.includes("signup")?"var(--mint)":"var(--amber)";
+  const rows = logs.map(l =>
+    '<tr style="border-bottom:1px solid rgba(255,255,255,0.03)" class="ar">'
+    + '<td style="padding:9px 14px;color:var(--text3);font-family:monospace;font-size:11px">' + new Date(l.ts).toLocaleString() + '</td>'
+    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.user||"—") + '</td>'
+    + '<td style="padding:9px 14px"><span style="color:' + ac(l.action) + ';font-weight:600;font-size:12px">' + l.action + '</span></td>'
+    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.resource||"—") + '</td>'
+    + '<td style="padding:9px 14px;color:var(--text3);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.detail||"—") + '</td>'
+    + '</tr>'
+  ).join("");
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9677; Audit Log</div><div class="page-subtitle">' + logs.length + ' events</div></div>'
+    + '<div class="card"><div class="card-head"><div class="card-title">Activity</div>'
+    + '<input class="input" id="af" placeholder="Filter..." style="width:180px;font-size:12px" oninput="filterAudit(this.value)">'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:1px;text-transform:uppercase">'
+    + '<th style="padding:10px 14px;text-align:left">Time</th><th style="padding:10px 14px;text-align:left">User</th><th style="padding:10px 14px;text-align:left">Action</th><th style="padding:10px 14px;text-align:left">Resource</th><th style="padding:10px 14px;text-align:left">Detail</th></tr></thead>'
+    + '<tbody>' + (rows || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text3)">No audit events yet</td></tr>') + '</tbody></table></div></div></div>';
+}
+
+async function pBilling() {
+  const r = await api('/api/v1/billing/status').catch(()=>({tier:"free",limits:{}}));
+  const tiers = [
+    {id:"starter",name:"Starter",price:"$49",agents:25,daemons:1,desc:"For individuals"},
+    {id:"pro",name:"Pro",price:"$199",agents:100,daemons:5,desc:"For growing teams",hot:true},
+    {id:"enterprise",name:"Enterprise",price:"$999",agents:"Unlimited",daemons:50,desc:"Full AI workforce"},
+  ];
+  const cards = tiers.map(t =>
+    '<div class="card" style="' + (t.hot?"border-color:var(--mint);":r.tier===t.id?"border-color:var(--violet);":"") + '">'
+    + '<div class="card-body" style="text-align:center;padding:28px 20px">'
+    + (r.tier===t.id?'<div style="font-size:10px;color:var(--violet);letter-spacing:2px;margin-bottom:8px">CURRENT</div>':"")
+    + (t.hot?'<div style="font-size:10px;color:var(--mint);letter-spacing:2px;margin-bottom:8px">MOST POPULAR</div>':"")
+    + '<div style="font-size:20px;font-weight:700;margin-bottom:6px">' + t.name + '</div>'
+    + '<div style="font-size:36px;font-weight:800;color:var(--mint)">' + t.price + '<span style="font-size:14px;color:var(--text3)">/mo</span></div>'
+    + '<div style="font-size:12px;color:var(--text3);margin:8px 0 16px">' + t.desc + '</div>'
+    + '<div style="font-size:12px;color:var(--text2);text-align:left;margin-bottom:16px">'
+    + '<div style="margin-bottom:4px">&#10003; ' + t.agents + ' agent runs/day</div>'
+    + '<div style="margin-bottom:4px">&#10003; ' + t.daemons + ' background workers</div>'
+    + '<div>&#10003; Telegram + Slack alerts</div></div>'
+    + (r.tier===t.id
+      ? '<button class="btn" style="width:100%;opacity:0.4" disabled>Current Plan</button>'
+      : '<button class="btn btn-mint" style="width:100%" onclick="upgradePlan(\''+ t.id +'\')">' + (r.tier==="free"?"Upgrade to ":"Switch to ") + t.name + '</button>')
+    + '</div></div>'
+  ).join("");
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9672; Billing</div>'
+    + '<div class="page-subtitle">Current: <strong style="color:var(--mint)">' + (r.tier||"free").toUpperCase() + '</strong></div></div>'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">' + cards + '</div></div>';
+}
+
+async function upgradePlan(tier) {
+  const r = await api('/api/v1/billing/checkout',{method:'POST',body:JSON.stringify({tier})});
+  if(r.checkout_url) window.location.href=r.checkout_url;
+  else alert("Contact sales@apexswarm.ai to upgrade");
+}
+
+async function stopDaemon(id) {
+  await api('/api/v1/daemons/'+id,{method:'DELETE'});
+  pSwarm();
+}
+
+async function pTeam() {
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9712; Team</div><div class="page-subtitle">Manage org access and team members</div></div>'
+    + '<div class="g2">'
+    + '<div class="card"><div class="card-head"><div class="card-title">Create Organization</div></div><div class="card-body">'
+    + '<label class="lbl">Org Name</label><input class="input" id="oName" placeholder="Acme Corp"><br>'
+    + '<label class="lbl">Slug</label><input class="input" id="oSlug" placeholder="acme-corp"><br>'
+    + '<label class="lbl">Owner Email</label><input class="input" id="oEmail" placeholder="admin@acme.com"><br>'
+    + '<label class="lbl">Slack Webhook (optional)</label><input class="input" id="oSlack" placeholder="https://hooks.slack.com/..."><br>'
+    + '<button class="btn btn-mint" style="margin-top:12px" onclick="createOrg()">Create</button>'
+    + '<div id="orgRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
+    + '<div class="card"><div class="card-head"><div class="card-title">Invite Team Member</div></div><div class="card-body">'
+    + '<label class="lbl">Org ID</label><input class="input" id="iOrg" placeholder="org-id"><br>'
+    + '<label class="lbl">Email</label><input class="input" id="iEmail" placeholder="teammate@acme.com"><br>'
+    + '<label class="lbl">Role</label><select class="input" id="iRole"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select><br>'
+    + '<button class="btn btn-mint" style="margin-top:12px" onclick="inviteMember()">Send Invite</button>'
+    + '<div id="invRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
+    + '</div>'
+    + '<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">Accept Invite</div></div><div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap">'
+    + '<input class="input" id="aTok" placeholder="Invite token" style="flex:1;min-width:180px">'
+    + '<input class="input" id="aEmail" placeholder="Your email" style="flex:1;min-width:180px">'
+    + '<button class="btn btn-mint" onclick="acceptInvite()">Accept</button></div>'
+    + '<div id="accRes" style="padding:0 20px 16px;font-size:12px;color:var(--mint)"></div></div>'
+    + '</div>';
+}
+
+async function createOrg() {
+  const r = await api('/api/v1/orgs',{method:'POST',body:JSON.stringify({name:$('#oName').value,slug:$('#oSlug').value,owner_email:$('#oEmail').value,slack_webhook:$('#oSlack').value})});
+  $('#orgRes').innerHTML = r.org_id ? "Created! Org ID: "+r.org_id+"<br>API Key: "+r.owner_api_key : "Error: "+(r.detail||JSON.stringify(r));
+  if(r.org_id) $('#iOrg').value = r.org_id;
+}
+
+async function inviteMember() {
+  const r = await api('/api/v1/orgs/'+$('#iOrg').value+'/invite',{method:'POST',body:JSON.stringify({email:$('#iEmail').value,role:$('#iRole').value})});
+  $('#invRes').innerHTML = r.invite_url ? 'Invite URL: <a href="'+r.invite_url+'" style="color:var(--mint)">'+r.invite_url+'</a>' : "Error: "+(r.detail||JSON.stringify(r));
+}
+
+async function acceptInvite() {
+  const r = await api('/api/v1/orgs/accept-invite',{method:'POST',body:JSON.stringify({token:$('#aTok').value,email:$('#aEmail').value})});
+  $('#accRes').textContent = r.api_key ? "API Key: "+r.api_key : "Error: "+(r.detail||JSON.stringify(r));
+}
+
+function filterAudit(q){document.querySelectorAll('.ar').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?"":"none");}
+
+async function pAudit() {
+  const r = await api('/api/v1/audit/logs?limit=100');
+  const logs = r.logs || [];
+  const ac = a => a.includes("fail")||a.includes("error")?"var(--rose)":a.includes("login")||a.includes("signup")?"var(--mint)":"var(--amber)";
+  const rows = logs.map(l =>
+    '<tr style="border-bottom:1px solid rgba(255,255,255,0.03)" class="ar">'
+    + '<td style="padding:9px 14px;color:var(--text3);font-family:monospace;font-size:11px">' + new Date(l.ts).toLocaleString() + '</td>'
+    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.user||"—") + '</td>'
+    + '<td style="padding:9px 14px"><span style="color:' + ac(l.action) + ';font-weight:600;font-size:12px">' + l.action + '</span></td>'
+    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.resource||"—") + '</td>'
+    + '<td style="padding:9px 14px;color:var(--text3);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.detail||"—") + '</td>'
+    + '</tr>'
+  ).join("");
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9677; Audit Log</div><div class="page-subtitle">' + logs.length + ' events</div></div>'
+    + '<div class="card"><div class="card-head"><div class="card-title">Activity</div>'
+    + '<input class="input" id="af" placeholder="Filter..." style="width:180px;font-size:12px" oninput="filterAudit(this.value)">'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:1px;text-transform:uppercase">'
+    + '<th style="padding:10px 14px;text-align:left">Time</th><th style="padding:10px 14px;text-align:left">User</th><th style="padding:10px 14px;text-align:left">Action</th><th style="padding:10px 14px;text-align:left">Resource</th><th style="padding:10px 14px;text-align:left">Detail</th></tr></thead>'
+    + '<tbody>' + (rows || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text3)">No audit events yet</td></tr>') + '</tbody></table></div></div></div>';
+}
+
+async function pBilling() {
+  const r = await api('/api/v1/billing/status').catch(()=>({tier:"free",limits:{}}));
+  const tiers = [
+    {id:"starter",name:"Starter",price:"$49",agents:25,daemons:1,desc:"For individuals"},
+    {id:"pro",name:"Pro",price:"$199",agents:100,daemons:5,desc:"For growing teams",hot:true},
+    {id:"enterprise",name:"Enterprise",price:"$999",agents:"Unlimited",daemons:50,desc:"Full AI workforce"},
+  ];
+  const cards = tiers.map(t =>
+    '<div class="card" style="' + (t.hot?"border-color:var(--mint);":r.tier===t.id?"border-color:var(--violet);":"") + '">'
+    + '<div class="card-body" style="text-align:center;padding:28px 20px">'
+    + (r.tier===t.id?'<div style="font-size:10px;color:var(--violet);letter-spacing:2px;margin-bottom:8px">CURRENT</div>':"")
+    + (t.hot?'<div style="font-size:10px;color:var(--mint);letter-spacing:2px;margin-bottom:8px">MOST POPULAR</div>':"")
+    + '<div style="font-size:20px;font-weight:700;margin-bottom:6px">' + t.name + '</div>'
+    + '<div style="font-size:36px;font-weight:800;color:var(--mint)">' + t.price + '<span style="font-size:14px;color:var(--text3)">/mo</span></div>'
+    + '<div style="font-size:12px;color:var(--text3);margin:8px 0 16px">' + t.desc + '</div>'
+    + '<div style="font-size:12px;color:var(--text2);text-align:left;margin-bottom:16px">'
+    + '<div style="margin-bottom:4px">&#10003; ' + t.agents + ' agent runs/day</div>'
+    + '<div style="margin-bottom:4px">&#10003; ' + t.daemons + ' background workers</div>'
+    + '<div>&#10003; Telegram + Slack alerts</div></div>'
+    + (r.tier===t.id
+      ? '<button class="btn" style="width:100%;opacity:0.4" disabled>Current Plan</button>'
+      : '<button class="btn btn-mint" style="width:100%" onclick="upgradePlan(\''+ t.id +'\')">' + (r.tier==="free"?"Upgrade to ":"Switch to ") + t.name + '</button>')
+    + '</div></div>'
+  ).join("");
+  $('#main').innerHTML = '<div class="page fade-up">'
+    + '<div class="page-header"><div class="page-title">&#9672; Billing</div>'
+    + '<div class="page-subtitle">Current: <strong style="color:var(--mint)">' + (r.tier||"free").toUpperCase() + '</strong></div></div>'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">' + cards + '</div></div>';
+}
+
+async function upgradePlan(tier) {
+  const r = await api('/api/v1/billing/checkout',{method:'POST',body:JSON.stringify({tier})});
+  if(r.checkout_url) window.location.href=r.checkout_url;
+  else alert("Contact sales@apexswarm.ai to upgrade");
 }
 
 async function pDaemons() {
@@ -4570,6 +6611,14 @@ function connectSSE() {
 }
 
 // ─── INIT ──────────────────────────
+const TOKEN = localStorage.getItem('apex_token') || "";
+function signOut() {
+  fetch('/api/v1/auth/logout',{method:'POST',headers:{'X-Session-Token':TOKEN}});
+  localStorage.removeItem('apex_token');
+  localStorage.removeItem('apex_key');
+  localStorage.removeItem('apex_email');
+  window.location.href='/login';
+}
 connectSSE();
 go('overview');
 </script>
