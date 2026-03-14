@@ -6556,6 +6556,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
       <div class="nav-btn" data-p="team" onclick="go('team')"><span class="icon">◰</span> Team</div>
       <div class="nav-btn" data-p="org" onclick="go('org')"><span class="icon">◑</span> Org Chart</div>
       <div class="nav-btn" data-p="settings" onclick="go('settings')"><span class="icon">◎</span> System</div>
+      <div class="nav-btn" data-p="usage" onclick="go('usage')"><span class="icon">◈</span> Usage</div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">New Features</div>
@@ -6613,7 +6614,7 @@ function go(p) {
   page = p;
   $$('.nav-btn').forEach(n => n.classList.toggle('active', n.dataset.p === p));
   $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
-  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,admin:pAdmin,admin:pAdmin,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings,souls:pSouls,identity:pIdentity,skills:pSkills,montecarlo:pMonteCarlo};
+  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,admin:pAdmin,admin:pAdmin,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings,souls:pSouls,identity:pIdentity,skills:pSkills,montecarlo:pMonteCarlo,usage:pUsage};
   (R[p]||pOverview)();
 }
 
@@ -7689,6 +7690,120 @@ async function runMC() {
     </div>`;
   } catch(e) {
     $('#mc-result').innerHTML = `<div style="color:var(--rose);padding:16px">${e.message||'Simulation failed'}</div>`;
+  }
+}
+
+
+// ─── USAGE PAGE ─────────────────────────────────
+let usageChart = null;
+async function pUsage() {
+  $('#main').innerHTML = `<div class="page-header"><div class="page-title">Usage</div><div class="page-subtitle">Token consumption, costs & quota</div></div>
+  <div style="padding:0 24px 24px">
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <button onclick="loadUsagePage('today')" id="ubtn-today" class="ubtn" style="font-size:12px;padding:6px 14px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer">Today</button>
+      <button onclick="loadUsagePage('week')" id="ubtn-week" class="ubtn" style="font-size:12px;padding:6px 14px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer">7 days</button>
+      <button onclick="loadUsagePage('month')" id="ubtn-month" class="ubtn" style="font-size:12px;padding:6px 14px;background:none;border:1px solid var(--mint);border-radius:6px;color:var(--mint);cursor:pointer">30 days</button>
+    </div>
+    <div id="usage-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+      ${['Runs','Tokens','Cost (USD)','Daily left'].map(l=>`<div style="background:var(--bg2);border-radius:8px;padding:14px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px">${l}</div><div style="font-size:22px;font-weight:600;color:var(--text1)">—</div></div>`).join('')}
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Daily quota</span>
+        <span id="quota-txt" style="font-size:12px;color:var(--text3)">—</span>
+      </div>
+      <div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
+        <div id="quota-fill" style="height:100%;width:0%;background:var(--mint);border-radius:4px;transition:width 0.4s"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:12px">
+      <div class="card">
+        <div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Runs per day</div>
+        <div style="position:relative;height:160px"><canvas id="usage-chart"></canvas></div>
+      </div>
+      <div class="card">
+        <div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Top agents</div>
+        <div id="usage-agents"></div>
+      </div>
+    </div>
+  </div>`;
+
+  // Load Chart.js dynamically
+  if (!window.Chart) {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    s.onload = () => loadUsagePage('month');
+    document.head.appendChild(s);
+  } else {
+    loadUsagePage('month');
+  }
+}
+
+async function loadUsagePage(period) {
+  // Update active button
+  document.querySelectorAll('.ubtn').forEach(b => {
+    const p = b.id.replace('ubtn-','');
+    b.style.borderColor = p === period ? 'var(--mint)' : 'var(--border)';
+    b.style.color = p === period ? 'var(--mint)' : 'var(--text2)';
+  });
+
+  try {
+    const d = await api('/api/v1/usage?period=' + period);
+
+    // Update stat cards
+    const cards = $('#usage-stats').querySelectorAll('div > div:last-child');
+    const vals = [
+      d.usage.total_runs.toLocaleString(),
+      d.usage.total_tokens >= 1000 ? (d.usage.total_tokens/1000).toFixed(1)+'k' : d.usage.total_tokens,
+      '$' + d.usage.total_cost_usd.toFixed(4),
+      d.today.remaining + ' / ' + d.today.limit
+    ];
+    cards.forEach((c,i) => c.textContent = vals[i]);
+
+    // Quota bar
+    const pct = Math.min(d.today.pct_used, 100);
+    $('#quota-fill').style.width = pct + '%';
+    $('#quota-fill').style.background = pct > 80 ? 'var(--rose)' : pct > 60 ? '#f0a500' : 'var(--mint)';
+    $('#quota-txt').textContent = d.today.runs + ' used · ' + d.today.remaining + ' remaining today · ' + d.tier + ' plan';
+
+    // Daily chart
+    if (window.Chart) {
+      const daily = (d.daily_breakdown||[]).slice().reverse().slice(-14);
+      const labels = daily.map(r => r.date.slice(5));
+      const data = daily.map(r => r.runs);
+      if (usageChart) usageChart.destroy();
+      usageChart = new Chart(document.getElementById('usage-chart'), {
+        type: 'bar',
+        data: { labels, datasets: [{ data, backgroundColor: '#4ECDC4', borderRadius: 3 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#888' } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: { size: 11 }, color: '#888', stepSize: 1 }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    // Top agents
+    const agentsEl = $('#usage-agents');
+    const types = d.by_agent_type || [];
+    agentsEl.innerHTML = types.length ? types.slice(0,6).map(t => {
+      const pct = d.usage.total_runs > 0 ? Math.round(t.runs/d.usage.total_runs*100) : 0;
+      return `<div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="font-size:12px;color:var(--text2);text-transform:capitalize">${t.agent_type.replace(/-/g,' ')}</span>
+          <span style="font-size:12px;color:var(--text3)">${t.runs}</span>
+        </div>
+        <div style="background:var(--bg2);border-radius:2px;height:4px">
+          <div style="height:100%;width:${pct}%;background:var(--mint);border-radius:2px"></div>
+        </div>
+      </div>`;
+    }).join('') : '<div style="font-size:13px;color:var(--text3)">No runs yet</div>';
+
+  } catch(e) {
+    $('#quota-txt').textContent = 'Could not load usage data';
   }
 }
 
