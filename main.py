@@ -4063,6 +4063,170 @@ async def trigger_self_improvement(daemon_id: str, api_key: str = Depends(get_ap
 
 
 
+
+# ─── USAGE TRACKING ENDPOINTS ────────────────────────────
+
+@app.get("/api/v1/usage")
+async def get_usage(period: str = "month", api_key: str = Depends(get_api_key)):
+    """Get usage stats for the current user. period: today|week|month|all"""
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "week":
+        cutoff = (now - timedelta(days=7)).isoformat()
+    elif period == "month":
+        cutoff = (now - timedelta(days=30)).isoformat()
+    else:
+        cutoff = "2000-01-01T00:00:00+00:00"
+
+    today_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    conn = get_db()
+    try:
+        row = conn.execute(
+            f"SELECT COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(cost_usd) FROM usage_log WHERE {USER_KEY_COL} = ? AND created_at > ?",
+            (api_key, cutoff)
+        ).fetchone()
+        total_runs = row[0] or 0
+        total_input = row[1] or 0
+        total_output = row[2] or 0
+        total_cost = row[3] or 0.0
+
+        by_type = conn.execute(
+            f"SELECT agent_type, COUNT(*), SUM(cost_usd) FROM usage_log WHERE {USER_KEY_COL} = ? AND created_at > ? GROUP BY agent_type ORDER BY COUNT(*) DESC LIMIT 10",
+            (api_key, cutoff)
+        ).fetchall()
+
+        daily = conn.execute(
+            f"SELECT substr(created_at, 1, 10) as day, COUNT(*), SUM(cost_usd) FROM usage_log WHERE {USER_KEY_COL} = ? AND created_at > ? GROUP BY day ORDER BY day DESC LIMIT 30",
+            (api_key, cutoff)
+        ).fetchall()
+
+        today_runs = conn.execute(
+            f"SELECT COUNT(*) FROM agents WHERE {USER_KEY_COL} = ? AND created_at > ?",
+            (api_key, today_cutoff)
+        ).fetchone()[0] or 0
+
+        user_row = conn.execute("SELECT tier FROM users WHERE api_key = ?", (api_key,)).fetchone()
+        tier = user_row[0] if user_row else "free"
+    except Exception as e:
+        tier = "free"
+        today_runs = 0
+        total_runs = total_input = total_output = 0
+        total_cost = 0.0
+        by_type = []
+        daily = []
+    finally:
+        conn.close()
+
+    active_daemons = 0
+    if MISSION_CONTROL and daemon_manager:
+        try:
+            active_daemons = len([d for d in daemon_manager.get_daemons() if d.get("status") == "running"])
+        except Exception:
+            pass
+
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    daily_limit = limits.get("max_agents_per_day", 0)
+
+    return {
+        "period": period,
+        "tier": tier,
+        "limits": limits,
+        "usage": {
+            "total_runs": total_runs,
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "total_cost_usd": round(total_cost, 4),
+        },
+        "today": {
+            "runs": today_runs,
+            "limit": daily_limit,
+            "remaining": max(0, daily_limit - today_runs),
+            "pct_used": round(today_runs / max(daily_limit, 1) * 100, 1),
+        },
+        "daemons": {
+            "active": active_daemons,
+            "limit": limits.get("max_daemons", 0),
+            "remaining": max(0, limits.get("max_daemons", 0) - active_daemons),
+        },
+        "by_agent_type": [
+            {"agent_type": r[0], "runs": r[1], "cost_usd": round(r[2] or 0, 4)}
+            for r in by_type
+        ],
+        "daily_breakdown": [
+            {"date": r[0], "runs": r[1], "cost_usd": round(r[2] or 0, 4)}
+            for r in daily
+        ],
+    }
+
+
+@app.get("/api/v1/usage/summary")
+async def get_usage_summary(api_key: str = Depends(get_api_key)):
+    """Quick usage summary — today + month totals + tier status."""
+    now = datetime.now(timezone.utc)
+    today_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    month_cutoff = (now - timedelta(days=30)).isoformat()
+    conn = get_db()
+    try:
+        today = conn.execute(
+            f"SELECT COUNT(*), SUM(cost_usd) FROM usage_log WHERE {USER_KEY_COL} = ? AND created_at > ?",
+            (api_key, today_cutoff)
+        ).fetchone()
+        month = conn.execute(
+            f"SELECT COUNT(*), SUM(cost_usd) FROM usage_log WHERE {USER_KEY_COL} = ? AND created_at > ?",
+            (api_key, month_cutoff)
+        ).fetchone()
+        today_agent_runs = conn.execute(
+            f"SELECT COUNT(*) FROM agents WHERE {USER_KEY_COL} = ? AND created_at > ?",
+            (api_key, today_cutoff)
+        ).fetchone()[0] or 0
+        user_row = conn.execute("SELECT tier FROM users WHERE api_key = ?", (api_key,)).fetchone()
+        tier = user_row[0] if user_row else "free"
+    except Exception:
+        tier = "free"
+        today = (0, 0)
+        month = (0, 0)
+        today_agent_runs = 0
+    finally:
+        conn.close()
+
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    daily_limit = limits.get("max_agents_per_day", 0)
+    return {
+        "tier": tier,
+        "today_runs": today[0] or 0,
+        "today_cost_usd": round(today[1] or 0, 4),
+        "month_runs": month[0] or 0,
+        "month_cost_usd": round(month[1] or 0, 4),
+        "daily_agents_used": today_agent_runs,
+        "daily_agents_limit": daily_limit,
+        "daily_agents_remaining": max(0, daily_limit - today_agent_runs),
+        "at_limit": today_agent_runs >= daily_limit,
+        "upgrade_needed": today_agent_runs >= daily_limit and tier in ["free", "starter"],
+    }
+
+
+@app.get("/api/v1/usage/leaderboard")
+async def get_usage_leaderboard(current_user: dict = Depends(get_validated_user)):
+    """Admin only — top users by usage this month."""
+    if current_user.get("tier") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    month_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            f"SELECT {USER_KEY_COL}, COUNT(*), SUM(cost_usd), MAX(created_at) FROM usage_log WHERE created_at > ? GROUP BY {USER_KEY_COL} ORDER BY COUNT(*) DESC LIMIT 20",
+            (month_cutoff,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return {"leaderboard": [
+        {"api_key": r[0][:12] + "...", "runs": r[1], "cost_usd": round(r[2] or 0, 4), "last_active": r[3]}
+        for r in rows
+    ]}
+
 # ─── SLASH SKILLS ENDPOINTS ──────────────────────────────
 
 @app.get("/api/v1/skills")
@@ -6393,6 +6557,13 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
       <div class="nav-btn" data-p="org" onclick="go('org')"><span class="icon">◑</span> Org Chart</div>
       <div class="nav-btn" data-p="settings" onclick="go('settings')"><span class="icon">◎</span> System</div>
     </div>
+    <div class="nav-group">
+      <div class="nav-group-label">New Features</div>
+      <div class="nav-btn" data-p="souls" onclick="go('souls')"><span class="icon">◉</span> Soul / Brain<span class="nav-badge">NEW</span></div>
+      <div class="nav-btn" data-p="identity" onclick="go('identity')"><span class="icon">◈</span> Identity<span class="nav-badge">NEW</span></div>
+      <div class="nav-btn" data-p="skills" onclick="go('skills')"><span class="icon">◆</span> Skills<span class="nav-badge">NEW</span></div>
+      <div class="nav-btn" data-p="montecarlo" onclick="go('montecarlo')"><span class="icon">◇</span> Monte Carlo<span class="nav-badge">NEW</span></div>
+    </div>
 
     <div class="nav-btn" data-p="admin" onclick="go('admin')"><span class="icon">&#9881;</span> Admin</div>
       <div class="sidebar-footer" style="flex-direction:column;align-items:stretch;gap:8px">
@@ -6442,7 +6613,7 @@ function go(p) {
   page = p;
   $$('.nav-btn').forEach(n => n.classList.toggle('active', n.dataset.p === p));
   $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
-  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,admin:pAdmin,admin:pAdmin,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings};
+  const R = {overview:pOverview,deploy:pDeploy,agents:pAgents,feed:pFeed,goals:pGoals,a2a:pA2A,swarm:pSwarm,daemons:pDaemons,admin:pAdmin,admin:pAdmin,workflows:pWorkflows,marketplace:pMarketplace,models:pModels,team:pTeam,org:pOrg,settings:pSettings,souls:pSouls,identity:pIdentity,skills:pSkills,montecarlo:pMonteCarlo};
   (R[p]||pOverview)();
 }
 
@@ -7310,6 +7481,215 @@ function connectSSE() {
   sse.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.event_type){events.push(d);if(events.length>200)events.shift();if(page==='feed')pFeed();if(page==='overview'){const f=$('#overviewFeed');if(f)f.innerHTML=events.slice(-6).reverse().map(ev=>`<div class="event-item"><div class="event-dot" style="background:var(--mint)"></div><div class="event-content">${ev.agent_name||ev.agent_type||'—'}<div class="event-time">${new Date(ev.timestamp).toLocaleTimeString()}</div></div></div>`).join('');}}}catch(x){}};
   sse.onerror=()=>{$('.pulse-dot').style.background='var(--rose)';$('.sidebar-status span').textContent='Offline';setTimeout(connectSSE,5000)};
   sse.onopen=()=>{$('.pulse-dot').style.background='var(--mint)';$('.sidebar-status span').textContent='Live'};
+}
+
+
+// ─── SOUL / BRAIN VIEWER ───────────────────────
+async function pSouls() {
+  $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
+  const daemons = await api('/api/v1/daemons');
+  const list = daemons.daemons || [];
+  if (!list.length) {
+    $('#main').innerHTML = `<div class="page-header"><div class="page-title">Soul / Brain</div><div class="page-subtitle">Daemon identity & learning system</div></div><div style="padding:40px;text-align:center;color:var(--text3)">No active daemons. Deploy a daemon to see its soul.</div>`;
+    return;
+  }
+  const souls = await Promise.all(list.map(d => api('/api/v1/daemons/' + d.daemon_id + '/soul').catch(() => null)));
+  const brains = await Promise.all(list.map(d => api('/api/v1/daemons/' + d.daemon_id + '/brain').catch(() => null)));
+  let cards = list.map((d, i) => {
+    const s = souls[i] || {};
+    const b = brains[i] || {};
+    const blockers = (s.blockers||[]).slice(0,3);
+    const learnings = (s.learnings||[]).slice(0,3);
+    const log = (s.improvement_log||[]).slice(-3).reverse();
+    return `<div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div style="font-weight:500;color:var(--text1)">${d.agent_name}</div>
+          <div style="font-size:12px;color:var(--text3)">${d.agent_type} · ${b.cycle_count||0} cycles · last run ${b.last_cycle_at ? new Date(b.last_cycle_at).toLocaleString() : 'never'}</div>
+        </div>
+        <button onclick="triggerImprove('${d.daemon_id}')" style="font-size:12px;padding:6px 12px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--mint);cursor:pointer">Improve now</button>
+      </div>
+      <div style="font-size:13px;color:var(--text2);background:var(--bg2);padding:10px 12px;border-radius:6px;margin-bottom:12px"><strong style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:1px">Mission</strong><br>${s.mission||'Not initialized'}</div>
+      ${b.last_result_summary ? `<div style="font-size:12px;color:var(--text3);background:var(--bg2);padding:8px 12px;border-radius:6px;margin-bottom:12px"><strong style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Last result</strong><br>${b.last_result_summary}</div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">Active blockers</div>
+          ${blockers.length ? blockers.map(b => `<div style="font-size:12px;color:var(--rose);padding:4px 0;border-bottom:1px solid var(--border)">${b}</div>`).join('') : '<div style="font-size:12px;color:var(--text3)">None detected</div>'}
+        </div>
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">Key learnings</div>
+          ${learnings.length ? learnings.map(l => `<div style="font-size:12px;color:var(--mint);padding:4px 0;border-bottom:1px solid var(--border)">${l}</div>`).join('') : '<div style="font-size:12px;color:var(--text3)">No learnings yet</div>'}
+        </div>
+      </div>
+      ${log.length ? `<div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">Improvement log</div>${log.map(e => `<div style="font-size:12px;color:var(--text2);padding:4px 0;border-bottom:1px solid var(--border)">${new Date(e.at).toLocaleDateString()} — ${e.summary||'No summary'} <span style="color:var(--text3)">(+${e.new_learnings||0} learnings, +${e.new_blockers||0} blockers)</span></div>`).join('')}` : ''}
+    </div>`;
+  }).join('');
+  $('#main').innerHTML = `<div class="page-header"><div class="page-title">Soul / Brain</div><div class="page-subtitle">Daemon identity, learnings & self-improvement</div></div><div style="padding:0 24px 24px">${cards}</div>`;
+}
+async function triggerImprove(id) {
+  await api('/api/v1/daemons/' + id + '/improve', {method:'POST'});
+  alert('Self-improvement started. Results in ~30s.');
+  pSouls();
+}
+
+// ─── IDENTITY PANEL ─────────────────────────────
+async function pIdentity() {
+  $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
+  const data = await api('/api/v1/identity');
+  const containers = data.containers || [];
+  let rows = containers.map(c => {
+    const remaining = (c.wallet_remaining||0).toFixed(2);
+    const spent = (c.wallet_spent_usd||0).toFixed(4);
+    const pct = c.wallet_budget_usd > 0 ? Math.min((c.wallet_spent_usd||0)/c.wallet_budget_usd*100,100).toFixed(0) : 0;
+    return `<tr>
+      <td style="padding:10px 8px"><div style="font-weight:500;font-size:13px;color:var(--text1)">${c.agent_name}</div><div style="font-size:11px;color:var(--text3)">${c.agent_type}</div></td>
+      <td style="padding:10px 8px;font-size:12px;color:var(--mint)">${c.email_alias||'—'}</td>
+      <td style="padding:10px 8px;font-size:12px;color:var(--text2)">${(c.permissions||[]).join(', ')||'none'}</td>
+      <td style="padding:10px 8px">
+        <div style="font-size:12px;color:var(--text2)">$${remaining} left · $${spent} spent</div>
+        <div style="background:var(--bg2);border-radius:3px;height:4px;margin-top:4px"><div style="height:100%;width:${pct}%;background:var(--mint);border-radius:3px"></div></div>
+      </td>
+      <td style="padding:10px 8px"><span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${c.active?'rgba(78,205,196,0.15)':'rgba(255,107,107,0.15)'};color:${c.active?'var(--mint)':'var(--rose)'}">${c.active?'Active':'Inactive'}</span></td>
+    </tr>`;
+  }).join('');
+  $('#main').innerHTML = `<div class="page-header"><div class="page-title">Identity Containers</div><div class="page-subtitle">Isolated agent identities, credentials & wallets</div></div>
+  <div style="padding:0 24px 24px">
+    ${!containers.length ? '<div style="text-align:center;padding:40px;color:var(--text3)">No identity containers. Deploy a daemon to auto-create one.</div>' : `
+    <div class="card">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3)">Agent</th>
+          <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3)">Email alias</th>
+          <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3)">Permissions</th>
+          <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3)">Wallet</th>
+          <th style="padding:8px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3)">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`}
+  </div>`;
+}
+
+// ─── SKILLS EXPLORER ────────────────────────────
+async function pSkills() {
+  $('#main').innerHTML = '<div style="display:flex;justify-content:center;padding:60px"><div class="spin"></div></div>';
+  const data = await api('/api/v1/skills');
+  const skills = data.skills || {};
+  const cards = Object.entries(skills).map(([key, s]) => `
+    <div class="card" style="cursor:pointer" onclick="trySkill('${key}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div style="font-size:20px">${s.icon}</div>
+        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:rgba(78,205,196,0.12);color:var(--mint)">${s.mode}</span>
+      </div>
+      <div style="font-weight:500;color:var(--text1);margin-bottom:4px;font-family:monospace;font-size:13px">${key}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px">${s.description}</div>
+      <div style="font-size:11px;color:var(--text3)">Agent: ${s.agent_type}</div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <button onclick="event.stopPropagation();trySkill('${key}')" style="font-size:12px;padding:6px 14px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--mint);cursor:pointer;width:100%">Try it ↗</button>
+      </div>
+    </div>`).join('');
+  $('#main').innerHTML = `<div class="page-header"><div class="page-title">Slash Skills</div><div class="page-subtitle">${data.count} specialist modes — prefix any task with a skill command</div></div>
+  <div style="padding:0 24px 24px">
+    <div style="background:var(--bg2);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:var(--text2)">
+      Usage: <code style="color:var(--mint)">/skill-name your task here</code> — works in API, Telegram, and the Deploy page
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">${cards}</div>
+  </div>`;
+}
+function trySkill(key) {
+  go('deploy');
+  setTimeout(() => {
+    const ta = $('#taskDesc');
+    if (ta) { ta.value = key + ' '; ta.focus(); }
+  }, 300);
+}
+
+// ─── MONTE CARLO ────────────────────────────────
+async function pMonteCarlo() {
+  $('#main').innerHTML = `<div class="page-header"><div class="page-title">Monte Carlo Trader</div><div class="page-subtitle">Run 10,000 price simulations to find mispriced prediction markets</div></div>
+  <div style="padding:0 24px 24px">
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:500;color:var(--text1);margin-bottom:16px">Analyze a prediction market</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Question</label>
+          <input id="mc-question" type="text" placeholder='Will BTC hit $100K by March 31?' style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Asset (BTC, ETH, GOLD...)</label>
+          <input id="mc-asset" type="text" placeholder="BTC" style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Target price ($)</label>
+          <input id="mc-target" type="number" placeholder="100000" style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Market probability (0-1)</label>
+          <input id="mc-mktprob" type="number" step="0.01" min="0.01" max="0.99" placeholder="0.18" style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Days to deadline</label>
+          <input id="mc-days" type="number" placeholder="17" style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);display:block;margin-bottom:6px">Direction</label>
+          <select id="mc-dir" style="width:100%;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+            <option value="above">Above target</option>
+            <option value="below">Below target</option>
+          </select>
+        </div>
+      </div>
+      <button onclick="runMC()" style="width:100%;padding:10px;background:var(--mint);color:#0a0e1a;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">Run 10,000 simulations</button>
+    </div>
+    <div id="mc-result"></div>
+  </div>`;
+}
+
+async function runMC() {
+  const q = $('#mc-question').value;
+  const asset = $('#mc-asset').value || 'BTC';
+  const target = parseFloat($('#mc-target').value);
+  const mktprob = parseFloat($('#mc-mktprob').value);
+  const days = parseFloat($('#mc-days').value) || 30;
+  const dir = $('#mc-dir').value;
+  if (!target || !mktprob) { alert('Enter target price and market probability'); return; }
+  $('#mc-result').innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)"><div class="spin" style="margin:0 auto 12px"></div>Running simulations...</div>';
+  try {
+    const r = await api('/api/v1/monte-carlo/analyze', {method:'POST', body:JSON.stringify({question:q||asset+' price simulation',asset,target_price:target,deadline_days:days,market_probability:mktprob,direction:dir,simulations:10000})});
+    const edge = r.edge || {};
+    const edgeColor = Math.abs(edge.edge_pct||0) > 20 ? 'var(--mint)' : Math.abs(edge.edge_pct||0) > 10 ? '#f0a500' : 'var(--text3)';
+    const actionColor = r.actionable ? 'var(--mint)' : 'var(--rose)';
+    $('#mc-result').innerHTML = `<div class="card">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+        <div style="background:var(--bg2);padding:12px;border-radius:8px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Our probability</div>
+          <div style="font-size:22px;font-weight:600;color:var(--mint)">${((r.our_probability||0)*100).toFixed(1)}%</div>
+        </div>
+        <div style="background:var(--bg2);padding:12px;border-radius:8px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Market says</div>
+          <div style="font-size:22px;font-weight:600;color:var(--text2)">${((r.market_probability||0)*100).toFixed(1)}%</div>
+        </div>
+        <div style="background:var(--bg2);padding:12px;border-radius:8px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Edge</div>
+          <div style="font-size:22px;font-weight:600;color:${edgeColor}">${edge.edge_pct > 0 ? '+' : ''}${(edge.edge_pct||0).toFixed(1)}%</div>
+        </div>
+        <div style="background:var(--bg2);padding:12px;border-radius:8px;text-align:center">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Confidence</div>
+          <div style="font-size:22px;font-weight:600;color:${actionColor}">${r.confidence||'—'}</div>
+        </div>
+      </div>
+      <div style="background:${r.actionable?'rgba(78,205,196,0.08)':'rgba(255,107,107,0.08)'};border:1px solid ${r.actionable?'rgba(78,205,196,0.3)':'rgba(255,107,107,0.3)'};border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-weight:600;color:${actionColor};margin-bottom:6px">${(r.recommendation||{}).action||'—'}</div>
+        <div style="font-size:13px;color:var(--text2)">${(r.recommendation||{}).reason||''}</div>
+      </div>
+      ${r.percentiles && r.percentiles.p50 ? `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+        ${['p10','p25','p50','p75','p90'].map(p => `<div style="text-align:center"><div style="font-size:11px;color:var(--text3)">${p}</div><div style="font-size:13px;font-weight:500;color:var(--text2)">$${(r.percentiles[p]||0).toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`).join('')}
+      </div>` : ''}
+      <div style="font-size:11px;color:var(--text3);margin-top:12px">Current price: $${(r.current_price||0).toLocaleString()} · ${r.simulations_run?.toLocaleString()} simulations · ${r.market_data?.source||''}</div>
+    </div>`;
+  } catch(e) {
+    $('#mc-result').innerHTML = `<div style="color:var(--rose);padding:16px">${e.message||'Simulation failed'}</div>`;
+  }
 }
 
 // ─── INIT ──────────────────────────
