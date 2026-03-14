@@ -218,7 +218,6 @@ def get_relevant_knowledge(
             created_at,
             success_count,
             fail_count,
-            times_used,
             source_agent
         FROM knowledge
         ORDER BY created_at DESC
