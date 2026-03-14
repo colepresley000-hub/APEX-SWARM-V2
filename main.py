@@ -40,7 +40,7 @@ logger = logging.getLogger("apex-swarm")
 # ─── CONFIG ───────────────────────────────────────────────
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20241022")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -1969,9 +1969,13 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 conn = get_db()
                 try:
                     row = conn.execute(
-                        f"SELECT alert_conditions FROM daemon_configs WHERE id = ?",
+                        f"SELECT alert_conditions, enabled FROM daemon_configs WHERE id = ?",
                         (agent_id,)
                     ).fetchone()
+                    # Don't fire alerts for stopped daemons
+                    if row and row[1] == 0:
+                        conn.close()
+                        return
                     alert_conds = json.loads(row[0]) if row and row[0] else []
                 finally:
                     conn.close()
@@ -7093,8 +7097,10 @@ async function configureSlack() {
 async function stopDaemon(id) {
   if (!confirm('Stop this daemon? It will stop sending alerts.')) return;
   try {
-    await api('/api/v1/daemons/'+id,{method:'DELETE'});
+    const r = await api('/api/v1/daemons/'+id,{method:'DELETE'});
   } catch(e) {}
+  // Small delay to let server process the stop
+  await new Promise(r => setTimeout(r, 800));
   pSwarm();
 }
 
@@ -7317,7 +7323,7 @@ async function pDaemons() {
     <div class="card"><div class="card-head"><div class="card-title">Running</div></div><div class="card-body">${daemons.map(d=>`<div class="agent-row"><div class="dot ${d.status==='running'?'live':'err'}"></div><div class="agent-info"><div class="agent-name">${d.agent_name}</div><div class="agent-task">${d.cycles} cycles</div></div><button class="btn btn-sm" style="color:var(--rose)" onclick="stopDaemon('${d.daemon_id}')">Stop</button></div>`).join('')||'<div style="text-align:center;padding:20px;color:var(--text3)">No daemons running</div>'}</div></div></div>`;
 }
 async function startDaemon(id){await api('/api/v1/daemons',{method:'POST',body:JSON.stringify({preset_id:id})});pDaemons();}
-async function stopDaemon(id){if(!confirm('Stop this daemon?'))return;try{await api('/api/v1/daemons/'+id,{method:'DELETE'});}catch(e){}pDaemons();}
+async function stopDaemon(id){if(!confirm('Stop this daemon?'))return;try{await api('/api/v1/daemons/'+id,{method:'DELETE'});}catch(e){}await new Promise(r=>setTimeout(r,800));pDaemons();}
 
 // ─── WORKFLOWS ──────────────────────────
 async function pWorkflows() {
