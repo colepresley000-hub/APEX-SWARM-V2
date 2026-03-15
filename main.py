@@ -228,7 +228,7 @@ except ImportError:
 # Monte Carlo Trading Engine
 MONTE_CARLO_AVAILABLE = False
 try:
-    from monte_carlo import run_monte_carlo_analysis, scan_for_opportunities, parse_polymarket_question
+    from monte_carlo import run_monte_carlo_analysis, scan_for_opportunities, parse_polymarket_question, search_polymarket_markets, get_trending_markets, get_polymarket_market, auto_scan_polymarket
     MONTE_CARLO_AVAILABLE = True
     logger.info("✅ monte_carlo loaded — prediction market simulation engine ready")
 except ImportError:
@@ -4238,6 +4238,103 @@ async def get_usage_leaderboard(current_user: dict = Depends(get_validated_user)
         for r in rows
     ]}
 
+
+# ─── POLYMARKET ENDPOINTS ─────────────────────────────────
+
+@app.get("/api/v1/polymarket/search")
+async def polymarket_search(q: str, limit: int = 10, api_key: str = Depends(get_api_key)):
+    """Search live Polymarket markets by keyword."""
+    if not MONTE_CARLO_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Monte Carlo engine not loaded")
+    markets = await search_polymarket_markets(q, limit=min(limit, 20))
+    return {"markets": markets, "count": len(markets)}
+
+
+@app.get("/api/v1/polymarket/trending")
+async def polymarket_trending(limit: int = 20, api_key: str = Depends(get_api_key)):
+    """Get trending Polymarket markets by 24h volume (excludes near-certain outcomes)."""
+    if not MONTE_CARLO_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Monte Carlo engine not loaded")
+    markets = await get_trending_markets(limit=min(limit, 50))
+    return {"markets": markets, "count": len(markets)}
+
+
+@app.get("/api/v1/polymarket/market/{market_id}")
+async def polymarket_get_market(market_id: str, api_key: str = Depends(get_api_key)):
+    """Get a specific Polymarket market by ID."""
+    if not MONTE_CARLO_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Monte Carlo engine not loaded")
+    market = await get_polymarket_market(market_id)
+    if not market:
+        raise HTTPException(status_code=404, detail="Market not found")
+    return market
+
+
+@app.post("/api/v1/polymarket/auto-scan")
+async def polymarket_auto_scan(
+    request: Request,
+    api_key: str = Depends(get_api_key)
+):
+    """
+    Fully autonomous scan: fetch trending markets, run Monte Carlo on each,
+    return mispricings above threshold.
+    """
+    if not MONTE_CARLO_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Monte Carlo engine not loaded")
+    data = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    simulations = min(int(data.get("simulations", 5000)), 20000)
+    min_edge = float(data.get("min_edge_pct", 15.0))
+    opportunities = await auto_scan_polymarket(simulations=simulations, min_edge_pct=min_edge)
+    return {
+        "opportunities": opportunities,
+        "count": len(opportunities),
+        "simulations_per_market": simulations,
+        "min_edge_pct": min_edge,
+    }
+
+
+@app.post("/api/v1/polymarket/analyze-market/{market_id}")
+async def polymarket_analyze_market(market_id: str, api_key: str = Depends(get_api_key)):
+    """Fetch a Polymarket market and run Monte Carlo analysis on it automatically."""
+    if not MONTE_CARLO_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Monte Carlo engine not loaded")
+    market = await get_polymarket_market(market_id)
+    if not market:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    q = market["question"]
+    market_prob = market["market_probability"]
+    if not market_prob:
+        raise HTTPException(status_code=400, detail="Could not extract market probability")
+
+    params = parse_polymarket_question(q)
+    if not params.get("target"):
+        raise HTTPException(status_code=400, detail="Could not parse price target from question")
+
+    deadline_days = params["deadline_days"]
+    if market.get("end_date"):
+        try:
+            from dateutil import parser as dp
+            from datetime import datetime
+            end = dp.parse(market["end_date"])
+            deadline_days = max(1, (end - datetime.now()).days)
+        except Exception:
+            pass
+
+    result = await run_monte_carlo_analysis(
+        question=q,
+        asset=params["asset"],
+        target_price=params["target"],
+        deadline_days=deadline_days,
+        market_probability=market_prob,
+        direction=params["direction"],
+        simulations=10000,
+    )
+    result["polymarket_url"] = market["url"]
+    result["market_data_source"] = "polymarket"
+    return result
+
+
 # ─── SLASH SKILLS ENDPOINTS ──────────────────────────────
 
 @app.get("/api/v1/skills")
@@ -7660,7 +7757,24 @@ async function pMonteCarlo() {
       <button onclick="runMC()" style="width:100%;padding:10px;background:var(--mint);color:#0a0e1a;border:none;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer">Run 10,000 simulations</button>
     </div>
     <div id="mc-result"></div>
-  </div>`;
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <div style="font-size:13px;font-weight:500;color:var(--text1);margin-bottom:12px">🔍 Search live Polymarket markets</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="pm-search" type="text" placeholder='BTC ETH gold election...' style="flex:1;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:13px">
+      <button onclick="searchPM()" style="padding:8px 16px;background:var(--mint);color:#0a0e1a;border:none;border-radius:6px;font-weight:600;cursor:pointer">Search</button>
+    </div>
+    <div id="pm-markets"></div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:500;color:var(--text1)">⚡ Auto-scan trending markets</div>
+      <button onclick="autoScanPM()" id="scan-btn" style="padding:6px 14px;background:none;border:1px solid var(--mint);border-radius:6px;color:var(--mint);font-size:12px;cursor:pointer">Run scan</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Fetches top 30 trending markets · runs 5,000 simulations each · returns mispricings with >15% edge</div>
+    <div id="pm-scan-result"></div>
+  </div>
+  </div>\`;
 }
 
 async function runMC() {
@@ -7822,6 +7936,74 @@ async function loadUsagePage(period) {
   } catch(e) {
     $('#quota-txt').textContent = 'Could not load usage data';
   }
+}
+
+
+async function searchPM() {
+  const q = $('#pm-search').value.trim();
+  if (!q) return;
+  $('#pm-markets').innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px">Searching...</div>';
+  try {
+    const d = await api('/api/v1/polymarket/search?q=' + encodeURIComponent(q) + '&limit=8');
+    const markets = d.markets || [];
+    if (!markets.length) { $('#pm-markets').innerHTML = '<div style="color:var(--text3);font-size:13px">No markets found</div>'; return; }
+    $('#pm-markets').innerHTML = markets.map(m => `<div style="padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer" onclick="loadMarketToForm('${m.id}','${(m.question||'').replace(/'/g,'').replace(/"/g,'')}',${m.yes_price||0.5})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="font-size:13px;color:var(--text1);flex:1;margin-right:12px">${m.question}</div>
+        <div style="font-size:16px;font-weight:600;color:${(m.yes_price||0)>0.5?'var(--mint)':'var(--rose)'};white-space:nowrap">${((m.yes_price||0)*100).toFixed(0)}¢</div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Vol 24h: $${((m.volume_24hr||0)/1000).toFixed(1)}K · Liquidity: $${((m.liquidity||0)/1000).toFixed(1)}K · <a href="${m.url}" target="_blank" style="color:var(--mint)">View →</a></div>
+    </div>`).join('');
+  } catch(e) { $('#pm-markets').innerHTML = '<div style="color:var(--rose);font-size:13px">Search failed</div>'; }
+}
+
+function loadMarketToForm(id, question, prob) {
+  $('#mc-question').value = question;
+  $('#mc-mktprob').value = prob.toFixed(2);
+  // Try to parse asset and target from question
+  api('/api/v1/monte-carlo/parse?question=' + encodeURIComponent(question)).then(p => {
+    if (p.asset) $('#mc-asset').value = p.asset;
+    if (p.target) $('#mc-target').value = p.target;
+    if (p.deadline_days) $('#mc-days').value = p.deadline_days;
+    if (p.direction) $('#mc-dir').value = p.direction;
+  }).catch(()=>{});
+}
+
+async function autoScanPM() {
+  const btn = $('#scan-btn');
+  btn.textContent = 'Scanning...';
+  btn.disabled = true;
+  $('#pm-scan-result').innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px;text-align:center"><div class="spin" style="margin:0 auto 8px"></div>Fetching trending markets and running simulations...</div>';
+  try {
+    const d = await api('/api/v1/polymarket/auto-scan', {method:'POST', body:JSON.stringify({simulations:5000,min_edge_pct:15})});
+    const opps = d.opportunities || [];
+    if (!opps.length) {
+      $('#pm-scan-result').innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px">No significant mispricings found in trending markets right now. Try again later.</div>';
+    } else {
+      $('#pm-scan-result').innerHTML = `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">${opps.length} opportunities found</div>` +
+        opps.slice(0,5).map(o => {
+          const edge = o.edge || {};
+          const edgeColor = Math.abs(edge.edge_pct||0) > 25 ? 'var(--mint)' : '#f0a500';
+          return `<div style="padding:12px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+              <div style="font-size:12px;color:var(--text1);flex:1;margin-right:12px">${o.question}</div>
+              <div style="font-size:14px;font-weight:600;color:${edgeColor};white-space:nowrap">${edge.edge_pct>0?'+':''}${(edge.edge_pct||0).toFixed(1)}% edge</div>
+            </div>
+            <div style="display:flex;gap:16px;font-size:11px;color:var(--text3)">
+              <span>Our: ${((o.our_probability||0)*100).toFixed(1)}%</span>
+              <span>Market: ${((o.market_probability||0)*100).toFixed(1)}%</span>
+              <span style="color:${o.actionable?'var(--mint)':'var(--rose)'}">${(o.recommendation||{}).action||'—'}</span>
+              <span>Size: ${(edge.suggested_position_pct||0).toFixed(1)}%</span>
+              ${o.polymarket_url ? `<a href="${o.polymarket_url}" target="_blank" style="color:var(--mint)">Trade →</a>` : ''}
+            </div>
+          </div>`;
+        }).join('');
+    }
+  } catch(e) {
+    $('#pm-scan-result').innerHTML = '<div style="color:var(--rose);font-size:13px">Scan failed: ' + e.message + '</div>';
+  }
+  btn.textContent = 'Run scan';
+  btn.disabled = false;
 }
 
 // ─── INIT ──────────────────────────
