@@ -240,23 +240,20 @@ class CommandRouter:
         if command in ("start", "help"):
             version = os.getenv("VERSION", "4.0")
             welcome = (
-                f"🤖 *APEX SWARM v{version} — Mission Control*\n\n"
-                "*Deploy Agents:*\n"
-                "/research Your question here\n"
+                f"APEX SWARM v{version} — Mission Control\n\n"
+                "DEPLOY AGENTS:\n"
+                "/research Your question\n"
                 "/crypto-research Analyze ETH\n"
-                "/blog-writer Write about AI agents\n"
-                "/code-reviewer Review my code\n\n"
-                "*Mission Control:*\n"
-                "/god_eye — Live swarm status\n"
-                "/daemons — List running daemons\n"
-                "/start_daemon <preset> — Start daemon\n"
-                "/stop_daemon <id> — Stop daemon\n"
-                "/subscribe — Get live feed\n"
-                "/unsubscribe — Stop live feed\n"
-                "/events — Recent activity\n"
-                "/models — Available AI models\n\n"
-                "*Daemon Presets:*\n"
-                "crypto-monitor, defi-yield-scanner, news-sentinel, whale-watcher, competitor-tracker"
+                "/blog-writer Write about AI\n\n"
+                "MISSION CONTROL:\n"
+                "/god_eye — Live status\n"
+                "/daemons — List daemons\n"
+                "/start_daemon crypto-monitor\n"
+                "/stop_daemon <id>\n"
+                "/subscribe — Live feed\n\n"
+                "SLASH SKILLS:\n"
+                "/skills — See all modes\n"
+                "/review /monetize /ship /analyze"
             )
             await send_to_channel(msg, welcome)
             return
