@@ -2638,11 +2638,18 @@ async def handle_telegram_message(message: dict):
 
 async def send_telegram(chat_id: int, text: str):
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
+        # Try with Markdown first, fall back to plain text if it fails
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                json={"chat_id": chat_id, "text": text[:4000], "parse_mode": "Markdown"},
             )
+            if r.status_code == 400:
+                # Markdown parse error — retry as plain text
+                await client.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                    json={"chat_id": chat_id, "text": text[:4000]},
+                )
     except Exception as e:
         logger.error(f"Telegram send failed: {e}")
 
@@ -7774,7 +7781,7 @@ async function pMonteCarlo() {
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Fetches top 30 trending markets · runs 5,000 simulations each · returns mispricings with >15% edge</div>
     <div id="pm-scan-result"></div>
   </div>
-  </div>\`;
+  </div>`;
 }
 
 async function runMC() {
