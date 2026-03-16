@@ -3919,8 +3919,12 @@ async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
 @app.get("/api/v1/daemons")
 async def list_daemons():
     if not MISSION_CONTROL:
-        return {"daemons": [], "message": "Mission Control not loaded"}
-    return {"daemons": daemon_manager.get_daemons()}
+        return {"daemons": [], "presets": {}, "message": "Mission Control not loaded"}
+    presets = {
+        pid: {"name": p["name"], "description": p.get("description",""), "agent_type": p["agent_type"], "interval_seconds": p["interval_seconds"], "task_description": p.get("task_description","")}
+        for pid, p in DAEMON_PRESETS.items()
+    }
+    return {"daemons": daemon_manager.get_daemons(), "presets": presets}
 
 
 @app.get("/api/v1/admin/users")
@@ -7208,32 +7212,6 @@ async function stopDaemon(id) {
   pSwarm();
 }
 
-async function pTeam() {
-  $('#main').innerHTML = '<div class="page fade-up">'
-    + '<div class="page-header"><div class="page-title">&#9712; Team</div><div class="page-subtitle">Manage org access and team members</div></div>'
-    + '<div class="g2">'
-    + '<div class="card"><div class="card-head"><div class="card-title">Create Organization</div></div><div class="card-body">'
-    + '<label class="lbl">Org Name</label><input class="input" id="oName" placeholder="Acme Corp"><br>'
-    + '<label class="lbl">Slug</label><input class="input" id="oSlug" placeholder="acme-corp"><br>'
-    + '<label class="lbl">Owner Email</label><input class="input" id="oEmail" placeholder="admin@acme.com"><br>'
-    + '<label class="lbl">Slack Webhook (optional)</label><input class="input" id="oSlack" placeholder="https://hooks.slack.com/..."><br>'
-    + '<button class="btn btn-mint" style="margin-top:12px" onclick="createOrg()">Create</button>'
-    + '<div id="orgRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
-    + '<div class="card"><div class="card-head"><div class="card-title">Invite Team Member</div></div><div class="card-body">'
-    + '<label class="lbl">Org ID</label><input class="input" id="iOrg" placeholder="org-id"><br>'
-    + '<label class="lbl">Email</label><input class="input" id="iEmail" placeholder="teammate@acme.com"><br>'
-    + '<label class="lbl">Role</label><select class="input" id="iRole"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select><br>'
-    + '<button class="btn btn-mint" style="margin-top:12px" onclick="inviteMember()">Send Invite</button>'
-    + '<div id="invRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
-    + '</div>'
-    + '<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">Accept Invite</div></div><div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap">'
-    + '<input class="input" id="aTok" placeholder="Invite token" style="flex:1;min-width:180px">'
-    + '<input class="input" id="aEmail" placeholder="Your email" style="flex:1;min-width:180px">'
-    + '<button class="btn btn-mint" onclick="acceptInvite()">Accept</button></div>'
-    + '<div id="accRes" style="padding:0 20px 16px;font-size:12px;color:var(--mint)"></div></div>'
-    + '</div>';
-}
-
 async function createOrg() {
   const r = await api('/api/v1/orgs',{method:'POST',body:JSON.stringify({name:$('#oName').value,slug:$('#oSlug').value,owner_email:$('#oEmail').value,slack_webhook:$('#oSlack').value})});
   $('#orgRes').innerHTML = r.org_id ? "Created! Org ID: "+r.org_id+"<br>API Key: "+r.owner_api_key : "Error: "+(r.detail||JSON.stringify(r));
@@ -7252,59 +7230,6 @@ async function acceptInvite() {
 
 function filterAudit(q){document.querySelectorAll('.ar').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?"":"none");}
 
-async function pAudit() {
-  const r = await api('/api/v1/audit/logs?limit=100');
-  const logs = r.logs || [];
-  const ac = a => a.includes("fail")||a.includes("error")?"var(--rose)":a.includes("login")||a.includes("signup")?"var(--mint)":"var(--amber)";
-  const rows = logs.map(l =>
-    '<tr style="border-bottom:1px solid rgba(255,255,255,0.03)" class="ar">'
-    + '<td style="padding:9px 14px;color:var(--text3);font-family:monospace;font-size:11px">' + new Date(l.ts).toLocaleString() + '</td>'
-    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.user||"—") + '</td>'
-    + '<td style="padding:9px 14px"><span style="color:' + ac(l.action) + ';font-weight:600;font-size:12px">' + l.action + '</span></td>'
-    + '<td style="padding:9px 14px;color:var(--text2);font-size:12px">' + (l.resource||"—") + '</td>'
-    + '<td style="padding:9px 14px;color:var(--text3);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.detail||"—") + '</td>'
-    + '</tr>'
-  ).join("");
-  $('#main').innerHTML = '<div class="page fade-up">'
-    + '<div class="page-header"><div class="page-title">&#9677; Audit Log</div><div class="page-subtitle">' + logs.length + ' events</div></div>'
-    + '<div class="card"><div class="card-head"><div class="card-title">Activity</div>'
-    + '<input class="input" id="af" placeholder="Filter..." style="width:180px;font-size:12px" oninput="filterAudit(this.value)">'
-    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    + '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text3);font-size:10px;letter-spacing:1px;text-transform:uppercase">'
-    + '<th style="padding:10px 14px;text-align:left">Time</th><th style="padding:10px 14px;text-align:left">User</th><th style="padding:10px 14px;text-align:left">Action</th><th style="padding:10px 14px;text-align:left">Resource</th><th style="padding:10px 14px;text-align:left">Detail</th></tr></thead>'
-    + '<tbody>' + (rows || '<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text3)">No audit events yet</td></tr>') + '</tbody></table></div></div></div>';
-}
-
-async function pBilling() {
-  const r = await api('/api/v1/billing/status').catch(()=>({tier:"free",limits:{}}));
-  const tiers = [
-    {id:"starter",name:"Starter",price:"$49",agents:25,daemons:1,desc:"For individuals"},
-    {id:"pro",name:"Pro",price:"$199",agents:100,daemons:5,desc:"For growing teams",hot:true},
-    {id:"enterprise",name:"Enterprise",price:"$999",agents:"Unlimited",daemons:50,desc:"Full AI workforce"},
-  ];
-  const cards = tiers.map(t =>
-    '<div class="card" style="' + (t.hot?"border-color:var(--mint);":r.tier===t.id?"border-color:var(--violet);":"") + '">'
-    + '<div class="card-body" style="text-align:center;padding:28px 20px">'
-    + (r.tier===t.id?'<div style="font-size:10px;color:var(--violet);letter-spacing:2px;margin-bottom:8px">CURRENT</div>':"")
-    + (t.hot?'<div style="font-size:10px;color:var(--mint);letter-spacing:2px;margin-bottom:8px">MOST POPULAR</div>':"")
-    + '<div style="font-size:20px;font-weight:700;margin-bottom:6px">' + t.name + '</div>'
-    + '<div style="font-size:36px;font-weight:800;color:var(--mint)">' + t.price + '<span style="font-size:14px;color:var(--text3)">/mo</span></div>'
-    + '<div style="font-size:12px;color:var(--text3);margin:8px 0 16px">' + t.desc + '</div>'
-    + '<div style="font-size:12px;color:var(--text2);text-align:left;margin-bottom:16px">'
-    + '<div style="margin-bottom:4px">&#10003; ' + t.agents + ' agent runs/day</div>'
-    + '<div style="margin-bottom:4px">&#10003; ' + t.daemons + ' background workers</div>'
-    + '<div>&#10003; Telegram + Slack alerts</div></div>'
-    + (r.tier===t.id
-      ? '<button class="btn" style="width:100%;opacity:0.4" disabled>Current Plan</button>'
-      : '<button class="btn btn-mint" style="width:100%" onclick="upgradePlan(\''+ t.id +'\')">' + (r.tier==="free"?"Upgrade to ":"Switch to ") + t.name + '</button>')
-    + '</div></div>'
-  ).join("");
-  $('#main').innerHTML = '<div class="page fade-up">'
-    + '<div class="page-header"><div class="page-title">&#9672; Billing</div>'
-    + '<div class="page-subtitle">Current: <strong style="color:var(--mint)">' + (r.tier||"free").toUpperCase() + '</strong></div></div>'
-    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">' + cards + '</div></div>';
-}
-
 async function upgradePlan(tier) {
   const r = await api('/api/v1/billing/checkout',{method:'POST',body:JSON.stringify({tier})});
   if(r.checkout_url) window.location.href=r.checkout_url;
@@ -7314,32 +7239,6 @@ async function upgradePlan(tier) {
 async function stopDaemon(id) {
   await api('/api/v1/daemons/'+id,{method:'DELETE'});
   pSwarm();
-}
-
-async function pTeam() {
-  $('#main').innerHTML = '<div class="page fade-up">'
-    + '<div class="page-header"><div class="page-title">&#9712; Team</div><div class="page-subtitle">Manage org access and team members</div></div>'
-    + '<div class="g2">'
-    + '<div class="card"><div class="card-head"><div class="card-title">Create Organization</div></div><div class="card-body">'
-    + '<label class="lbl">Org Name</label><input class="input" id="oName" placeholder="Acme Corp"><br>'
-    + '<label class="lbl">Slug</label><input class="input" id="oSlug" placeholder="acme-corp"><br>'
-    + '<label class="lbl">Owner Email</label><input class="input" id="oEmail" placeholder="admin@acme.com"><br>'
-    + '<label class="lbl">Slack Webhook (optional)</label><input class="input" id="oSlack" placeholder="https://hooks.slack.com/..."><br>'
-    + '<button class="btn btn-mint" style="margin-top:12px" onclick="createOrg()">Create</button>'
-    + '<div id="orgRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
-    + '<div class="card"><div class="card-head"><div class="card-title">Invite Team Member</div></div><div class="card-body">'
-    + '<label class="lbl">Org ID</label><input class="input" id="iOrg" placeholder="org-id"><br>'
-    + '<label class="lbl">Email</label><input class="input" id="iEmail" placeholder="teammate@acme.com"><br>'
-    + '<label class="lbl">Role</label><select class="input" id="iRole"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select><br>'
-    + '<button class="btn btn-mint" style="margin-top:12px" onclick="inviteMember()">Send Invite</button>'
-    + '<div id="invRes" style="margin-top:12px;font-size:12px;color:var(--mint)"></div></div></div>'
-    + '</div>'
-    + '<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">Accept Invite</div></div><div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap">'
-    + '<input class="input" id="aTok" placeholder="Invite token" style="flex:1;min-width:180px">'
-    + '<input class="input" id="aEmail" placeholder="Your email" style="flex:1;min-width:180px">'
-    + '<button class="btn btn-mint" onclick="acceptInvite()">Accept</button></div>'
-    + '<div id="accRes" style="padding:0 20px 16px;font-size:12px;color:var(--mint)"></div></div>'
-    + '</div>';
 }
 
 async function createOrg() {
