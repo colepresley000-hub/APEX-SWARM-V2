@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 import time
 import uuid
@@ -50,7 +51,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_STARTER_PRICE = os.getenv("STRIPE_STARTER_PRICE", "")
 STRIPE_PRO_PRICE = os.getenv("STRIPE_PRO_PRICE", "")
 STRIPE_ENTERPRISE_PRICE = os.getenv("STRIPE_ENTERPRISE_PRICE", "")
-JWT_SECRET = os.getenv("JWT_SECRET", "apex-swarm-jwt-secret-change-in-prod")
+JWT_SECRET = os.getenv("JWT_SECRET") or secrets.token_hex(32)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 BASE_URL = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
@@ -60,7 +61,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_STARTER_PRICE = os.getenv("STRIPE_STARTER_PRICE", "")
 STRIPE_PRO_PRICE = os.getenv("STRIPE_PRO_PRICE", "")
 STRIPE_ENTERPRISE_PRICE = os.getenv("STRIPE_ENTERPRISE_PRICE", "")
-JWT_SECRET = os.getenv("JWT_SECRET", "apex-swarm-jwt-secret-change-in-prod")
+JWT_SECRET = os.getenv("JWT_SECRET") or secrets.token_hex(32)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 BASE_URL = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
@@ -1844,6 +1845,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
             agent_type=agent_type,
             agent_name=agent["name"],
             message=task_description[:200],
+            user_api_key=user_api_key,
         ))
 
     # Inject knowledge
@@ -1960,6 +1962,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 agent_name=agent["name"],
                 message="Task completed",
                 data={"result_preview": result[:300] if result else ""},
+                user_api_key=user_api_key,
             ))
 
         # ── DAEMON ALERT: Check if result contains alert keywords ──
@@ -2082,6 +2085,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 agent_type=agent_type,
                 agent_name=agent.get("name", agent_type),
                 message=str(e)[:300],
+                user_api_key=user_api_key,
             ))
 
         # Trigger workflows on agent failure
@@ -3130,7 +3134,7 @@ async def billing_status(request: Request):
 # ─── AUDIT LOG ──────────────────────────────────────────
 
 @app.get("/api/v1/audit/logs")
-async def get_audit_logs(request: Request, limit: int=100, offset: int=0):
+async def get_audit_logs(request: Request, limit: int=100, offset: int=0, api_key: str = Depends(get_api_key)):
     conn = get_db()
     try:
         rows = db_fetchall(conn,
@@ -3507,20 +3511,6 @@ async def billing_status(request: Request):
     limits = TIER_LIMITS.get(tier,{})
     return {"tier":tier,"limits":limits}
 
-# ─── AUDIT LOG ──────────────────────────────────────────
-
-@app.get("/api/v1/audit/logs")
-async def get_audit_logs(request: Request, limit: int=100, offset: int=0):
-    conn = get_db()
-    try:
-        rows = db_fetchall(conn,
-            "SELECT id,user_email,org_id,action,resource,detail,ip,created_at FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit,offset))
-        total = db_fetchone(conn,"SELECT COUNT(*) FROM audit_log",())[0]
-    finally:
-        conn.close()
-    return {"logs":[{"id":r[0],"user":r[1],"org_id":r[2],"action":r[3],"resource":r[4],"detail":r[5],"ip":r[6],"ts":r[7]} for r in rows],"total":total}
-
 # ─── ORG MANAGEMENT ─────────────────────────────────────
 
 class CreateOrgRequest(BaseModel):
@@ -3731,23 +3721,34 @@ async def legacy_stats(request: Request):
 # ─── MISSION CONTROL ENDPOINTS ───────────────────────────
 
 @app.get("/api/v1/events/stream")
-async def event_stream(request: Request):
-    """SSE endpoint — real-time God-eye stream of all agent activity."""
+async def event_stream(request: Request, api_key: Optional[str] = None):
+    """SSE endpoint — real-time stream filtered to the authenticated user's events."""
     if not MISSION_CONTROL:
         raise HTTPException(status_code=503, detail="Mission Control not loaded")
+
+    # Accept api_key from query param (EventSource doesn't support custom headers)
+    # Fall back to X-Api-Key header if not in query
+    if not api_key:
+        api_key = request.headers.get("X-Api-Key") or request.headers.get("authorization", "").replace("Bearer ", "") or None
 
     async def generate():
         queue = event_bus.subscribe()
         try:
             # Send initial connection event
-            yield f"event: connected\ndata: {{\"message\": \"God-eye connected\", \"version\": \"{VERSION}\"}}\n\n"
+            yield f"event: connected\ndata: {{\"message\": \"Connected\", \"version\": \"{VERSION}\"}}\n\n"
             import json as _json
             for past in event_bus.get_history(limit=20):
+                # Filter: only send events belonging to this user (or system events with no owner)
+                if api_key and past.get("user_api_key") and past["user_api_key"] != api_key:
+                    continue
                 yield f"data: {_json.dumps(past)}\n\n"
 
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    # Filter: only forward events for this user (or system events with no owner)
+                    if api_key and event.user_api_key and event.user_api_key != api_key:
+                        continue
                     yield event.to_sse()
                 except asyncio.TimeoutError:
                     # Send heartbeat to keep connection alive
@@ -4584,17 +4585,20 @@ async def recent_agents(limit: int = 20, api_key: str = Depends(get_api_key)):
 
 
 @app.post("/api/v1/deploy")
-async def deploy_agent(req: DeployRequest, api_key: str = Depends(get_api_key)):
+async def deploy_agent(req: DeployRequest, user_info: dict = Depends(get_validated_user)):
     """Deploy a single agent to execute a task."""
+    api_key = user_info["api_key"]
+    user_tier = user_info.get("tier", "starter")
+
     if req.agent_type not in AGENTS:
         raise HTTPException(status_code=400, detail=f"Unknown agent: {req.agent_type}")
 
-    # Rate limit check
+    # Rate limit check using the user's actual subscription tier
     if rate_limiter:
-        check = rate_limiter.check(api_key, "starter")  # TODO: get tier from validated user
+        check = rate_limiter.check(api_key, user_tier)
         if not check["allowed"]:
             raise HTTPException(status_code=429, detail=check["message"])
-        rate_limiter.consume(api_key, "starter")
+        rate_limiter.consume(api_key, user_tier)
 
     # Parse slash commands from task description
     skill_applied = None
@@ -5987,6 +5991,12 @@ async def landing_page():
     return HTMLResponse(LANDING_HTML)
 
 
+@app.get("/agents", response_class=HTMLResponse)
+async def agents_page():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/#agents", status_code=301)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return HTMLResponse(DASHBOARD_HTML.replace("__VERSION__", VERSION))
@@ -6026,7 +6036,7 @@ nav.scrolled{background:rgba(4,4,10,0.92);backdrop-filter:blur(24px);border-bott
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 .hero-title{font-family:'Bebas Neue',sans-serif;font-size:clamp(80px,12vw,180px);line-height:.88;letter-spacing:-2px;margin-bottom:32px}
 .hero-title .line{overflow:hidden;display:block}
-.hero-title .word{display:inline-block;transform:translateY(110%);opacity:0}
+.hero-title .word{display:inline-block;opacity:0}
 .hero-title .accent{color:transparent;-webkit-text-stroke:1.5px var(--mint);filter:drop-shadow(0 0 20px rgba(0,255,170,0.3))}
 .hero-sub{font-size:clamp(15px,2vw,20px);color:var(--text2);font-weight:300;max-width:560px;line-height:1.8;margin-bottom:52px;opacity:0}
 .hero-cta{display:flex;gap:14px;justify-content:center;opacity:0}
@@ -6393,9 +6403,10 @@ document.querySelectorAll('a,button,.bento-card,.agent-pill').forEach(el=>{
   el.addEventListener('mouseleave',()=>{cur.style.width='8px';cur.style.height='8px';fol.style.width='32px';fol.style.height='32px';fol.style.borderColor='rgba(0,255,170,0.4)'});
 });
 window.addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',window.scrollY>60));
+gsap.set('.hero-title .word',{yPercent:110,opacity:0});
 const tl=gsap.timeline({delay:.1});
 tl.to('.hero-eyebrow',{opacity:1,y:0,duration:.7,ease:'power3.out'})
-  .to('.hero-title .word',{y:0,opacity:1,duration:.9,ease:'power4.out',stagger:.08},'-=.3')
+  .to('.hero-title .word',{yPercent:0,opacity:1,duration:.9,ease:'power4.out',stagger:.08},'-=.3')
   .to('.hero-sub',{opacity:1,y:0,duration:.7,ease:'power3.out'},'-=.4')
   .to('.hero-cta',{opacity:1,y:0,duration:.6,ease:'power3.out'},'-=.4')
   .to('.hero-metrics',{opacity:1,y:0,duration:.6,ease:'power3.out'},'-=.3');
@@ -7500,13 +7511,13 @@ async function pSettings() {
       <div class="card"><div class="card-head"><div class="card-title">Channels</div></div><div class="card-body">${Object.entries(m||{}).map(([n,i])=>`<div class="agent-row"><div class="dot ${i.enabled?'live':'idle'}"></div><div class="agent-name" style="text-transform:capitalize">${n}</div><span class="agent-badge ${i.enabled?'badge-done':'badge-err'}">${i.enabled?'Connected':'Off'}</span></div>`).join('')}</div></div>
     </div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Platform API Key</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your APEX SWARM platform key (auto-assigned at signup)</div><input class="input" id="sKey" value="${KEY}" style="font-family:'IBM Plex Mono',monospace;font-size:12px" readonly></div></div>
-      <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Anthropic API Key (BYOK)</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your personal Anthropic key — agents use this to run. Never shared. <a href="https://console.anthropic.com" target="_blank" style="color:var(--mint)">Get one →</a></div><input class="input" id="sAnthropicKey" value="${localStorage.getItem('apex_anthropic_key')||''}" placeholder="sk-ant-..." style="font-family:'IBM Plex Mono',monospace;font-size:12px"><button class="btn btn-mint btn-sm" style="margin-top:10px" onclick="localStorage.setItem('apex_anthropic_key',$('#sAnthropicKey').value);alert('Anthropic key saved locally.')">Save Key</button></div></div></div>`;
+</div>`;
 }
 
 // ─── SSE ──────────────────────────
 function connectSSE() {
   if(sse)sse.close();
-  sse=new EventSource(BASE+'/api/v1/events/stream');
+  sse=new EventSource(BASE+'/api/v1/events/stream'+(KEY?'?api_key='+encodeURIComponent(KEY):''));
   sse.onmessage=e=>{try{const d=JSON.parse(e.data);if(d.event_type){events.push(d);if(events.length>200)events.shift();if(page==='feed')pFeed();if(page==='overview'){const f=$('#overviewFeed');if(f)f.innerHTML=events.slice(-6).reverse().map(ev=>`<div class="event-item"><div class="event-dot" style="background:var(--mint)"></div><div class="event-content">${ev.agent_name||ev.agent_type||'—'}<div class="event-time">${new Date(ev.timestamp).toLocaleTimeString()}</div></div></div>`).join('');}}}catch(x){}};
   sse.onerror=()=>{$('.pulse-dot').style.background='var(--rose)';$('.sidebar-status span').textContent='Offline';setTimeout(connectSSE,5000)};
   sse.onopen=()=>{$('.pulse-dot').style.background='var(--mint)';$('.sidebar-status span').textContent='Live'};

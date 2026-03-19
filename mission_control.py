@@ -75,6 +75,7 @@ class Event:
     data: dict = field(default_factory=dict)
     timestamp: str = ""
     event_id: str = ""
+    user_api_key: str = ""
 
     def __post_init__(self):
         if not self.timestamp:
@@ -92,6 +93,7 @@ class Event:
             "message": self.message,
             "data": self.data,
             "timestamp": self.timestamp,
+            "user_api_key": self.user_api_key,
         }
 
     def to_sse(self) -> str:
