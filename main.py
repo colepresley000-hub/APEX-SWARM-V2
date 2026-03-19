@@ -831,6 +831,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
                 ("knowledge", "source_agent", "TEXT DEFAULT ''"),
                 ("knowledge", "version", "INTEGER DEFAULT 1"),
                 ("audit_log", "flagged", "BOOLEAN DEFAULT FALSE"),
+                ("users", "anthropic_api_key", "TEXT DEFAULT NULL"),
             ]
             for table, col, col_type in migration_columns:
                 try:
@@ -992,6 +993,18 @@ CREATE TABLE IF NOT EXISTS usage_log (
 
             conn.commit()
             logger.info(f"✅ SQLite database initialized (key column: {USER_KEY_COL})")
+
+            # Migration: add missing columns to SQLite (safe — IF NOT EXISTS not supported, use try/except)
+            sqlite_migrations = [
+                ("users", "anthropic_api_key", "TEXT DEFAULT NULL"),
+            ]
+            for tbl, col, col_type in sqlite_migrations:
+                try:
+                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {col_type}")
+                    conn.commit()
+                    logger.info(f"✅ SQLite migration: added {tbl}.{col}")
+                except Exception:
+                    pass  # Column already exists
     finally:
         conn.close()
 
@@ -1418,6 +1431,30 @@ def remove_daemon_config(daemon_id: str):
         conn.close()
 
 
+def is_daemon_enabled(daemon_id: str) -> bool:
+    """DB kill switch used by the daemon loop.
+
+    Returns True if the daemon should keep running, False if it has been
+    stopped/disabled.  Fails OPEN (returns True) on any DB error so that a
+    transient connection hiccup doesn't inadvertently kill a daemon.
+    """
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT enabled FROM daemon_configs WHERE id = ?", (daemon_id,)
+        ).fetchone()
+        if row is None:
+            # Not in DB at all — treat as disabled so orphan tasks self-clean.
+            logger.info(f"🛑 Daemon {daemon_id[:8]}: not found in DB — self-terminating")
+            return False
+        return bool(row[0])
+    except Exception as e:
+        logger.warning(f"is_daemon_enabled({daemon_id[:8]}): DB check failed ({e}) — failing open")
+        return True  # fail open: don't kill daemon on transient DB errors
+    finally:
+        conn.close()
+
+
 async def restore_daemons():
     """Restart enabled daemons from DB after deploy."""
     if not MISSION_CONTROL:
@@ -1451,6 +1488,7 @@ async def restore_daemons():
                 alert_conditions=alerts,
                 user_api_key=user_key,
                 daemon_id=did,  # Reuse the existing DB id so stop/disable operations match
+                get_db_fn=is_daemon_enabled,  # DB kill switch: self-terminate if enabled=0
             )
             logger.info(f"  ✅ Restored daemon: {agent_name} ({did[:8]})")
         except Exception as e:
@@ -1760,6 +1798,23 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
     """Execute a single agent task. Enterprise-hardened with retries, sanitization, metrics."""
     start_time = time.time() if ENTERPRISE else 0
 
+    # ── BYOK: Resolve the Anthropic API key for this user ──
+    # Look up the user's own Anthropic key; fall back to platform key if not set.
+    effective_api_key = ANTHROPIC_API_KEY
+    try:
+        _byok_conn = get_db()
+        try:
+            _byok_row = _byok_conn.execute(
+                "SELECT anthropic_api_key FROM users WHERE api_key=?", (user_api_key,)
+            ).fetchone()
+            if _byok_row and _byok_row[0]:
+                effective_api_key = _byok_row[0]
+                logger.debug(f"BYOK: using user's own Anthropic key for {user_api_key[:8]}...")
+        finally:
+            _byok_conn.close()
+    except Exception as _byok_err:
+        logger.debug(f"BYOK lookup skipped: {_byok_err}")
+
     # ── SECURITY: Input sanitization ──
     if ENTERPRISE:
         scan = sanitize_input(task_description)
@@ -1888,7 +1943,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
             # Use requested model, or env default, or auto-select
             selected_model = model or CLAUDE_MODEL
             result = await execute_with_tools(
-                api_key=ANTHROPIC_API_KEY,
+                api_key=effective_api_key,
                 model=selected_model,
                 system_prompt=system_prompt,
                 user_message=task_description,
@@ -1905,7 +1960,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": ANTHROPIC_API_KEY,
+                        "x-api-key": effective_api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
@@ -2555,6 +2610,7 @@ async def handle_telegram_message(message: dict):
             interval_seconds=preset["interval_seconds"],
             alert_conditions=preset.get("alert_conditions", []),
             user_api_key=f"telegram:{chat_id}",
+            get_db_fn=is_daemon_enabled,  # DB kill switch: self-terminate if enabled=0
         )
         # Persist daemon config to DB so it survives server restarts
         save_daemon_config(
@@ -2693,6 +2749,7 @@ async def lifespan(app: FastAPI):
             daemon_execute_fn=_daemon_execute_fn if MISSION_CONTROL else None,
             get_db=get_db,
             user_key_col=USER_KEY_COL,
+            daemon_enabled_fn=is_daemon_enabled if MISSION_CONTROL else None,
         )
         channels_active = []
         if TELEGRAM_ENABLED: channels_active.append("Telegram")
@@ -3892,6 +3949,7 @@ async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
             interval_seconds=preset["interval_seconds"],
             alert_conditions=preset.get("alert_conditions", []),
             user_api_key=api_key,
+            get_db_fn=is_daemon_enabled,  # DB kill switch: self-terminate if enabled=0
         )
         save_daemon_config(daemon_id, api_key, req.preset_id, preset["agent_type"], preset["name"],
                            task_desc, preset["interval_seconds"], 0, preset.get("alert_conditions", []))
@@ -3915,6 +3973,7 @@ async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
             max_cycles=req.max_cycles,
             alert_conditions=req.alert_conditions,
             user_api_key=api_key,
+            get_db_fn=is_daemon_enabled,  # DB kill switch: self-terminate if enabled=0
         )
         save_daemon_config(daemon_id, api_key, "", req.agent_type, req.agent_name,
                            req.task_description, req.interval_seconds, req.max_cycles, req.alert_conditions)
@@ -3942,6 +4001,68 @@ async def list_daemons():
     }
     return {"daemons": daemon_manager.get_daemons(), "presets": presets}
 
+
+
+
+# ─── BYOK SETTINGS ENDPOINTS ─────────────────────────────
+
+@app.post("/api/v1/settings/api-key")
+async def settings_save_api_key(request: Request):
+    """Save the user's own Anthropic API key for BYOK."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    anthropic_key = body.get("anthropic_api_key","").strip()
+    if not anthropic_key:
+        raise HTTPException(status_code=400, detail="anthropic_api_key is required")
+    if not anthropic_key.startswith("sk-ant-"):
+        raise HTTPException(status_code=400, detail="Invalid key format — must start with 'sk-ant-'")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT id FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id = result[0]
+        conn.execute("UPDATE users SET anthropic_api_key=? WHERE id=?", (anthropic_key, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "message": "Anthropic API key saved. Your agents will now use your own key."}
+
+@app.get("/api/v1/settings/api-key")
+async def settings_get_api_key(request: Request):
+    """Return whether the user has an Anthropic API key saved (never returns the actual key)."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT anthropic_api_key FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        has_key = bool(result[0])
+    finally:
+        conn.close()
+    return {"has_key": has_key}
+
+@app.delete("/api/v1/settings/api-key")
+async def settings_delete_api_key(request: Request):
+    """Clear the user's stored Anthropic API key."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT id FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id = result[0]
+        conn.execute("UPDATE users SET anthropic_api_key=NULL WHERE id=?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "message": "Anthropic API key removed. Falling back to platform key."}
 
 @app.get("/api/v1/admin/users")
 async def admin_list_users(current_user: dict = Depends(get_validated_user)):
@@ -7509,7 +7630,8 @@ async function pOrg() {
 
 // ─── SETTINGS ──────────────────────────
 async function pSettings() {
-  const [h,m]=await Promise.all([api('/api/v1/health'),api('/api/v1/channels')]);
+  const [h,m,byok]=await Promise.all([api('/api/v1/health'),api('/api/v1/channels'),api('/api/v1/settings/api-key')]);
+  const hasKey = byok && byok.has_key;
   $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">System</div></div>
     <div class="g2">
       <div class="card"><div class="card-head"><div class="card-title">Info</div></div><div class="card-body" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text2);line-height:2.2">
@@ -7518,7 +7640,41 @@ async function pSettings() {
       <div class="card"><div class="card-head"><div class="card-title">Channels</div></div><div class="card-body">${Object.entries(m||{}).map(([n,i])=>`<div class="agent-row"><div class="dot ${i.enabled?'live':'idle'}"></div><div class="agent-name" style="text-transform:capitalize">${n}</div><span class="agent-badge ${i.enabled?'badge-done':'badge-err'}">${i.enabled?'Connected':'Off'}</span></div>`).join('')}</div></div>
     </div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Platform API Key</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your APEX SWARM platform key (auto-assigned at signup)</div><input class="input" id="sKey" value="${KEY}" style="font-family:'IBM Plex Mono',monospace;font-size:12px" readonly></div></div>
+    <div class="card" style="margin-top:14px" id="byokCard">
+      <div class="card-head"><div class="card-title">Bring Your Own Key (BYOK)</div></div>
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Use your own Anthropic API key for all agent runs. Your key is stored securely and never shared with other users.</div>
+        <div id="byokStatus" style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+          ${hasKey
+            ? '<span style="color:var(--mint);font-size:13px">✓ Key saved</span><span style="font-size:12px;color:var(--text3)">— your agents use your own Anthropic key</span>'
+            : '<span style="color:var(--text3);font-size:13px">No key saved</span><span style="font-size:12px;color:var(--text3)">— agents use the platform key</span>'}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="password" id="byokInput" class="input" placeholder="sk-ant-..." style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px">
+          <button onclick="byokSave()" style="padding:9px 16px;background:var(--mint);color:#0a0a0f;border:none;border-radius:7px;font-weight:600;font-size:13px;cursor:pointer">Save</button>
+          ${hasKey ? '<button onclick="byokRemove()" style="padding:9px 14px;background:none;border:1px solid var(--rose);border-radius:7px;color:var(--rose);font-size:13px;cursor:pointer">Remove</button>' : ''}
+        </div>
+        <div id="byokMsg" style="font-size:12px;margin-top:8px;display:none"></div>
+      </div>
+    </div>
 </div>`;
+}
+async function byokSave() {
+  const val = $('#byokInput').value.trim();
+  const msg = $('#byokMsg');
+  if (!val) { msg.textContent='Enter your Anthropic API key first.'; msg.style.color='var(--rose)'; msg.style.display='block'; return; }
+  if (!val.startsWith('sk-ant-')) { msg.textContent='Key must start with sk-ant-'; msg.style.color='var(--rose)'; msg.style.display='block'; return; }
+  const r = await api('/api/v1/settings/api-key', {method:'POST', body:JSON.stringify({anthropic_api_key:val})});
+  if (r.ok) {
+    msg.textContent='✓ Key saved successfully.'; msg.style.color='var(--mint)'; msg.style.display='block';
+    setTimeout(()=>pSettings(), 800);
+  } else {
+    msg.textContent = r.detail || 'Failed to save key.'; msg.style.color='var(--rose)'; msg.style.display='block';
+  }
+}
+async function byokRemove() {
+  const r = await api('/api/v1/settings/api-key', {method:'DELETE'});
+  if (r.ok) pSettings();
 }
 
 // ─── SSE ──────────────────────────
