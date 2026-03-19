@@ -205,11 +205,12 @@ class CommandRouter:
         self._daemon_presets = {}
         self._daemon_execute_fn = None
         self._get_db = None
+        self._daemon_enabled_fn = None
         self._user_key_col = "user_api_key"
 
     def setup(self, agents, agent_to_category, execute_fn, event_bus=None,
               daemon_manager=None, daemon_presets=None, daemon_execute_fn=None,
-              get_db=None, user_key_col="user_api_key"):
+              get_db=None, user_key_col="user_api_key", daemon_enabled_fn=None):
         """Wire up dependencies from main.py."""
         self._agents = agents
         self._agent_to_category = agent_to_category
@@ -219,6 +220,7 @@ class CommandRouter:
         self._daemon_presets = daemon_presets or {}
         self._daemon_execute_fn = daemon_execute_fn
         self._get_db = get_db
+        self._daemon_enabled_fn = daemon_enabled_fn  # DB kill switch callable
         self._user_key_col = user_key_col
 
     async def _execute_and_reply(self, msg, agent_id, agent_type, task):
@@ -389,6 +391,7 @@ class CommandRouter:
                 interval_seconds=preset["interval_seconds"],
                 alert_conditions=preset.get("alert_conditions", []),
                 user_api_key=msg.user_api_key,
+                get_db_fn=self._daemon_enabled_fn,  # DB kill switch: self-terminate if enabled=0
             )
             # Persist daemon config to DB so it survives server restarts/deploys
             if self._get_db:

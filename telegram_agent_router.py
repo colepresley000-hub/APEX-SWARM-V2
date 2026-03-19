@@ -1,13 +1,12 @@
-import os
 import requests
 import time
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "8140483743")
-APEX_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+TELEGRAM_BOT_TOKEN = "8140483743:AAHJ2U8-O1Pc541nVzJCJAObZuN2u6Q5Gb4"
+TELEGRAM_CHAT_ID = "8140483743"
+APEX_API_KEY = "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"
 
 API_URL = "https://apex-swarm-v2-production.up.railway.app/api/v1/deploy/sync"
 

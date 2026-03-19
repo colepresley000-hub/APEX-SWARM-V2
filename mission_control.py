@@ -331,6 +331,7 @@ class DaemonManager:
         alert_conditions: list[str] = None,
         user_api_key: str = "system",
         daemon_id: str = None,
+        get_db_fn: Optional[Callable] = None,
     ) -> str:
         """Start a persistent daemon agent that runs on a loop."""
         # Allow callers (e.g. restore_daemons) to supply the existing ID so that
@@ -350,7 +351,7 @@ class DaemonManager:
         }
 
         task = asyncio.create_task(
-            self._daemon_loop(daemon_id, config, execute_fn)
+            self._daemon_loop(daemon_id, config, execute_fn, get_db_fn)
         )
 
         self._daemons[daemon_id] = {
@@ -372,7 +373,7 @@ class DaemonManager:
 
         return daemon_id
 
-    async def _daemon_loop(self, daemon_id: str, config: dict, execute_fn: Callable):
+    async def _daemon_loop(self, daemon_id: str, config: dict, execute_fn: Callable, get_db_fn: Optional[Callable] = None):
         """The core daemon loop: observe → decide → act → sleep → repeat."""
         agent_type = config["agent_type"]
         agent_name = config["agent_name"]
@@ -387,6 +388,28 @@ class DaemonManager:
                 cycle += 1
                 if daemon_id not in self._daemons:
                     break
+
+                # ── DB KILL SWITCH ────────────────────────────────────────────
+                # Check the database enabled flag before every cycle.  This is
+                # the definitive self-termination path: even if the asyncio task
+                # cancel didn't propagate cleanly (e.g. the process was busy
+                # during execute_fn) the daemon will notice it has been disabled
+                # and exit on the very next iteration.
+                if get_db_fn is not None:
+                    try:
+                        if not get_db_fn(daemon_id):
+                            logger.info(
+                                f"🛑 Daemon {daemon_id[:8]} ({agent_name}): "
+                                f"enabled=0 in DB — self-terminating"
+                            )
+                            break
+                    except Exception as _db_err:
+                        logger.warning(
+                            f"Daemon {daemon_id[:8]}: DB enabled-check failed "
+                            f"({_db_err}) — continuing"
+                        )
+                # ─────────────────────────────────────────────────────────────
+
                 if max_cycles > 0 and cycle > max_cycles:
                     break
 
