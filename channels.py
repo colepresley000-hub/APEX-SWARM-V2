@@ -390,6 +390,25 @@ class CommandRouter:
                 alert_conditions=preset.get("alert_conditions", []),
                 user_api_key=msg.user_api_key,
             )
+            # Persist daemon config to DB so it survives server restarts/deploys
+            if self._get_db:
+                try:
+                    import json as _json
+                    from datetime import datetime, timezone as _tz
+                    conn = self._get_db()
+                    now = datetime.now(_tz.utc).isoformat()
+                    try:
+                        conn.execute(
+                            f"INSERT INTO daemon_configs (id, {self._user_key_col}, preset_id, agent_type, agent_name, task_description, interval_seconds, max_cycles, alert_conditions, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                            (daemon_id, msg.user_api_key, preset_id, preset["agent_type"], preset["name"],
+                             preset["task_description"], preset["interval_seconds"], 0,
+                             _json.dumps(preset.get("alert_conditions", [])), now),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+                except Exception as e:
+                    logger.error(f"Failed to persist daemon config to DB: {e}")
             await send_to_channel(msg, f"👁️ *{preset['name']}* started\nID: `{daemon_id[:8]}`\nInterval: every {preset['interval_seconds']}s\n\nStop: /stop_daemon {daemon_id[:8]}")
             return
 
@@ -408,6 +427,17 @@ class CommandRouter:
                 await send_to_channel(msg, f"No daemon found matching {short_id}")
                 return
             await self._daemon_manager.stop_daemon(found)
+            # Persist stop to DB so the daemon doesn't come back after a server restart/deploy
+            if self._get_db:
+                try:
+                    conn = self._get_db()
+                    try:
+                        conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                except Exception as e:
+                    logger.error(f"Failed to persist daemon stop to DB: {e}")
             await send_to_channel(msg, f"Daemon {short_id} stopped")
             return
 

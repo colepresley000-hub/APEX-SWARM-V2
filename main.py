@@ -1450,6 +1450,7 @@ async def restore_daemons():
                 max_cycles=max_cyc,
                 alert_conditions=alerts,
                 user_api_key=user_key,
+                daemon_id=did,  # Reuse the existing DB id so stop/disable operations match
             )
             logger.info(f"  ✅ Restored daemon: {agent_name} ({did[:8]})")
         except Exception as e:
@@ -2555,6 +2556,11 @@ async def handle_telegram_message(message: dict):
             alert_conditions=preset.get("alert_conditions", []),
             user_api_key=f"telegram:{chat_id}",
         )
+        # Persist daemon config to DB so it survives server restarts
+        save_daemon_config(
+            daemon_id, f"telegram:{chat_id}", preset_id, preset["agent_type"], preset["name"],
+            preset["task_description"], preset["interval_seconds"], 0, preset.get("alert_conditions", []),
+        )
         await send_telegram(chat_id, f"👁️ *{preset['name']}* started\nID: `{daemon_id[:8]}`\nInterval: every {preset['interval_seconds']}s\n\nStop with: /stop\\_daemon {daemon_id[:8]}")
         return
 
@@ -2573,6 +2579,7 @@ async def handle_telegram_message(message: dict):
             await send_telegram(chat_id, f"No daemon found matching `{short_id}`")
             return
         await daemon_manager.stop_daemon(found)
+        remove_daemon_config(found)  # Persist stop to DB so daemon doesn't restart after deploy
         await send_telegram(chat_id, f"⏹️ Daemon `{short_id}` stopped")
         return
 

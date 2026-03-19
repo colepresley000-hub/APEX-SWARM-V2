@@ -330,9 +330,13 @@ class DaemonManager:
         max_cycles: int = 0,
         alert_conditions: list[str] = None,
         user_api_key: str = "system",
+        daemon_id: str = None,
     ) -> str:
         """Start a persistent daemon agent that runs on a loop."""
-        daemon_id = str(uuid.uuid4())
+        # Allow callers (e.g. restore_daemons) to supply the existing ID so that
+        # the in-memory daemon_id always matches the database primary key.
+        if daemon_id is None:
+            daemon_id = str(uuid.uuid4())
 
         config = {
             "agent_type": agent_type,
