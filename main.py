@@ -1370,6 +1370,30 @@ async def restore_daemons():
         return
     conn = get_db()
     try:
+        # ── DEDUP: if the same preset was started multiple times, keep only the
+        # most recently created row and disable older duplicates.  This prevents
+        # one preset (e.g. crypto-monitor) from spawning multiple concurrent
+        # loops that all fire alerts independently.
+        try:
+            dup_presets = db_fetchall(conn,
+                "SELECT preset_id FROM daemon_configs "
+                "WHERE enabled = 1 AND preset_id IS NOT NULL AND preset_id != '' "
+                "GROUP BY preset_id HAVING COUNT(*) > 1"
+            )
+            for (pid,) in dup_presets:
+                dup_rows = db_fetchall(conn,
+                    "SELECT id FROM daemon_configs WHERE enabled = 1 AND preset_id = ? "
+                    "ORDER BY created_at DESC", (pid,)
+                )
+                # Keep the first (most recent), disable the rest
+                for older in dup_rows[1:]:
+                    conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (older[0],))
+                    logger.info(f"  🧹 Disabled duplicate daemon for preset '{pid}': {older[0][:8]}")
+            if dup_presets:
+                conn.commit()
+        except Exception as _e:
+            logger.warning(f"Daemon dedup step failed (non-fatal): {_e}")
+
         rows = db_fetchall(conn,
             f"SELECT id, {USER_KEY_COL}, preset_id, agent_type, agent_name, task_description, interval_seconds, max_cycles, alert_conditions FROM daemon_configs WHERE enabled = 1"
         )
@@ -3193,12 +3217,26 @@ async def god_eye_status():
         total = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
         completed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'completed'").fetchone()[0]
         failed = conn.execute("SELECT COUNT(*) FROM agents WHERE status = 'failed'").fetchone()[0]
+        # DB-based daemon count — accurate in multi-worker Railway deployments.
+        # In-memory event_bus.get_stats() only knows about daemons on THIS worker;
+        # querying daemon_configs WHERE enabled=1 is the source of truth.
+        try:
+            active_daemons_db = conn.execute(
+                "SELECT COUNT(*) FROM daemon_configs WHERE enabled = 1"
+            ).fetchone()[0]
+        except Exception:
+            active_daemons_db = stats.get("active_daemons", 0)
     finally:
         conn.close()
 
     return {
         "version": VERSION,
         "mission_control": MISSION_CONTROL,
+        # ── top-level fields read by the dashboard overview widget ────────────
+        "active_agents": stats.get("active_agents", running),
+        "active_daemons": active_daemons_db,   # DB count — works across workers
+        "total_events": stats.get("total_events", 0),
+        # ─────────────────────────────────────────────────────────────────────
         "db": {"running": running, "total": total, "completed": completed, "failed": failed},
         "live": stats,
         "modules": {
@@ -3244,6 +3282,27 @@ class DaemonRequest(BaseModel):
 async def start_daemon(req: DaemonRequest, api_key: str = Depends(get_api_key)):
     if not MISSION_CONTROL:
         raise HTTPException(status_code=503, detail="Mission Control not loaded")
+
+    # ── DEDUP: stop any existing enabled instance of this preset before starting
+    # a new one.  Without this, each click of "Start" adds another DB row and
+    # another asyncio loop, producing duplicate alerts on every cycle.
+    if req.preset_id:
+        conn = get_db()
+        try:
+            existing = db_fetchall(conn,
+                "SELECT id FROM daemon_configs WHERE enabled = 1 AND preset_id = ?",
+                (req.preset_id,)
+            )
+            for (eid,) in existing:
+                conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (eid,))
+                await daemon_manager.stop_daemon(eid)
+                logger.info(f"  🔄 Stopped existing '{req.preset_id}' daemon {eid[:8]} before restart")
+            if existing:
+                conn.commit()
+        except Exception as _e:
+            logger.warning(f"Pre-start dedup failed (non-fatal): {_e}")
+        finally:
+            conn.close()
 
     if req.preset_id and req.preset_id in DAEMON_PRESETS:
         preset = DAEMON_PRESETS[req.preset_id]

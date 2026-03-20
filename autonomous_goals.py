@@ -579,9 +579,8 @@ Then compare against APEX SWARM's capabilities:
 - What should we prioritize building next?
 
 Output a structured competitive intelligence briefing with actionable recommendations.""",
-    "alert_conditions": [
-        {"field": "result", "operator": "contains", "value": "behind"},
-        {"field": "result", "operator": "contains", "value": "gap"},
-        {"field": "result", "operator": "contains", "value": "urgent"},
-    ],
+    # Simple string keywords — the daemon alert engine does a case-insensitive
+    # substring match, so dicts would silently fail (.lower() on a dict raises
+    # AttributeError which is swallowed).  Use plain strings here.
+    "alert_conditions": ["behind", "gap", "urgent", "ahead", "threat"],
 }
