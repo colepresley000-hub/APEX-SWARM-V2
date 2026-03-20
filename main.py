@@ -3306,7 +3306,41 @@ async def list_daemons():
         pid: {"name": p["name"], "description": p.get("description",""), "agent_type": p["agent_type"], "interval_seconds": p["interval_seconds"], "task_description": p.get("task_description","")}
         for pid, p in DAEMON_PRESETS.items()
     }
-    return {"daemons": daemon_manager.get_daemons(), "presets": presets}
+    # ── DB is the source of truth ─────────────────────────────────────────────
+    # Reading from the in-memory daemon_manager dict fails in multi-worker
+    # deployments (Railway spins up several processes; only one worker runs the
+    # actual asyncio tasks).  Query daemon_configs WHERE enabled=1 so the
+    # dashboard always reflects reality, then enrich with in-memory data
+    # (cycles / last_result) when this worker happens to be the one running them.
+    conn = get_db()
+    try:
+        rows = db_fetchall(conn,
+            f"SELECT id, agent_type, agent_name, task_description, interval_seconds, created_at "
+            f"FROM daemon_configs WHERE enabled = 1"
+        )
+    finally:
+        conn.close()
+
+    # Build an index of in-memory data for fast lookup
+    mem = {d["daemon_id"]: d for d in daemon_manager.get_daemons()}
+
+    daemons = []
+    for row in rows:
+        did, agent_type, agent_name, task_desc, interval_secs, created_at = row
+        m = mem.get(did, {})
+        daemons.append({
+            "daemon_id": did,
+            "agent_type": agent_type,
+            "agent_name": agent_name,
+            "task": (task_desc or "")[:200],
+            "interval_seconds": interval_secs,
+            "status": m.get("status", "running"),   # default "running" — if it's in DB enabled=1 it's running
+            "cycles": m.get("cycles", 0),
+            "last_result_preview": m.get("last_result_preview", ""),
+            "created_at": created_at or "",
+        })
+
+    return {"daemons": daemons, "presets": presets}
 
 
 
@@ -3413,23 +3447,39 @@ async def list_daemon_presets():
 async def stop_daemon(daemon_id: str, api_key: str = Depends(get_api_key)):
     if not MISSION_CONTROL:
         raise HTTPException(status_code=503, detail="Mission Control not loaded")
-    # Support short IDs
+    # Support short IDs — check in-memory first, then fall back to DB.
+    # In multi-worker deployments the worker serving this DELETE may not be the
+    # one running the asyncio task, so we must not rely solely on memory.
     found = None
     for d in daemon_manager.get_daemons():
         if d["daemon_id"].startswith(daemon_id):
             found = d["daemon_id"]
             break
     if not found:
+        # Fall back: search DB for any enabled daemon whose id starts with daemon_id
+        conn = get_db()
+        try:
+            row = db_fetchall(conn,
+                "SELECT id FROM daemon_configs WHERE enabled = 1 AND id LIKE ?",
+                (daemon_id + "%",)
+            )
+            if row:
+                found = row[0][0]
+        finally:
+            conn.close()
+    if not found:
         raise HTTPException(status_code=404, detail="Daemon not found")
-    # Disable in DB first so alerts stop immediately even if task takes time to cancel
+    # Disable in DB first — this is the definitive kill switch.  The daemon's
+    # own _daemon_loop checks enabled=0 at the top of every cycle and
+    # self-terminates, even if the asyncio.cancel() below hits a different worker.
     conn = get_db()
     try:
         conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
         conn.commit()
     finally:
         conn.close()
+    # Best-effort in-memory cancel (no-op when this worker isn't the runner)
     await daemon_manager.stop_daemon(found)
-    remove_daemon_config(found)
     return {"status": "stopped", "daemon_id": found}
 
 

@@ -417,3 +417,96 @@ async def scan_for_opportunities(
     # Sort by absolute edge
     opportunities.sort(key=lambda x: abs(x["edge"]["edge_pct"]), reverse=True)
     return opportunities
+
+
+# ─── POLYMARKET API HELPERS ────────────────────────────────
+# These functions call the Polymarket Gamma REST API.
+# They are used by the /api/v1/polymarket/* endpoints in main.py.
+
+GAMMA_BASE = "https://gamma-api.polymarket.com"
+
+
+async def search_polymarket_markets(q: str, limit: int = 20) -> list[dict]:
+    """Search active Polymarket markets by keyword."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{GAMMA_BASE}/markets",
+                params={"q": q, "active": "true", "closed": "false", "limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            markets = data if isinstance(data, list) else data.get("markets", [])
+            return markets[:limit]
+    except Exception as e:
+        logger.warning(f"search_polymarket_markets error: {e}")
+        return []
+
+
+async def get_trending_markets(limit: int = 50) -> list[dict]:
+    """Fetch trending active Polymarket markets sorted by 24h volume."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{GAMMA_BASE}/markets",
+                params={"active": "true", "closed": "false", "order": "volume24hr", "ascending": "false", "limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            markets = data if isinstance(data, list) else data.get("markets", [])
+            # Filter out near-certain outcomes (price < 2% or > 98%)
+            filtered = []
+            for m in markets:
+                try:
+                    price = float(m.get("lastTradePrice") or m.get("midpoint") or 0.5)
+                    if 0.02 <= price <= 0.98:
+                        filtered.append(m)
+                except Exception:
+                    filtered.append(m)
+            return filtered[:limit]
+    except Exception as e:
+        logger.warning(f"get_trending_markets error: {e}")
+        return []
+
+
+async def get_polymarket_market(market_id: str) -> Optional[dict]:
+    """Fetch a single Polymarket market by condition ID or slug."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{GAMMA_BASE}/markets/{market_id}")
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        logger.warning(f"get_polymarket_market({market_id}) error: {e}")
+        return None
+
+
+async def auto_scan_polymarket(
+    simulations: int = 5000,
+    min_edge_pct: float = 15.0,
+    limit: int = 30,
+) -> list[dict]:
+    """
+    Autonomous end-to-end scan: fetch trending markets, run Monte Carlo on each,
+    return opportunities whose edge exceeds min_edge_pct.
+    """
+    markets = await get_trending_markets(limit=limit)
+    if not markets:
+        return []
+
+    questions = []
+    for m in markets:
+        question = m.get("question") or m.get("title") or ""
+        if not question:
+            continue
+        # Polymarket prices are 0-1 representing probability
+        try:
+            prob = float(m.get("lastTradePrice") or m.get("midpoint") or 0.5)
+        except Exception:
+            prob = 0.5
+        questions.append({"question": question, "market_probability": prob})
+
+    opportunities = await scan_for_opportunities(questions, simulations=simulations)
+    return [o for o in opportunities if abs(o.get("edge", {}).get("edge_pct", 0)) >= min_edge_pct]
