@@ -321,8 +321,13 @@ async def run_monte_carlo_analysis(
 def parse_polymarket_question(question: str) -> dict:
     """
     Parse a Polymarket-style question into simulation parameters.
-    Returns best-guess asset, target, direction, deadline.
+    Returns best-guess asset, target, direction, deadline, and question_type.
+
+    question_type is one of:
+      "price"  — a numeric price target was extracted; Monte Carlo applies
+      "event"  — binary outcome (election, approval, etc.); no price target
     """
+    import re
     q = question.lower()
 
     # Asset detection
@@ -339,10 +344,11 @@ def parse_polymarket_question(question: str) -> dict:
     if any(w in q for w in ["below", "under", "drop", "fall", "lose", "decline"]):
         direction = "below"
 
-    # Price extraction (look for $ amounts)
-    import re
-    prices = re.findall(r'\$[\d,]+(?:\.\d+)?[kK]?', question)
+    # ── Price extraction (multiple strategies, in priority order) ──────────
     target = None
+
+    # 1. Dollar-prefixed amounts: $100, $50k, $1,000, $100.50
+    prices = re.findall(r'\$[\d,]+(?:\.\d+)?[kK]?', question)
     if prices:
         p = prices[0].replace('$', '').replace(',', '')
         if p.lower().endswith('k'):
@@ -350,7 +356,34 @@ def parse_polymarket_question(question: str) -> dict:
         else:
             target = float(p)
 
-    # Deadline extraction
+    # 2. Bare number + k/K suffix: "reach 100k", "above 50K", "hit 200k"
+    if target is None:
+        k_matches = re.findall(r'\b(\d+(?:\.\d+)?)\s*[kK]\b', question)
+        if k_matches:
+            target = float(k_matches[0]) * 1000
+
+    # 3. Large bare integers (≥4 digits) likely to be prices:
+    #    "reach 100000", "above 50000", "exceed 3500"
+    #    Exclude year-like numbers (2020–2030) used as dates.
+    if target is None:
+        bare = re.findall(r'\b(\d[\d,]*(?:\.\d+)?)\b', question)
+        for raw in bare:
+            val = float(raw.replace(',', ''))
+            # Skip 4-digit values in the year range (2000-2040) unless question
+            # clearly refers to a price (has "above/below/reach/hit/exceed/over")
+            is_price_context = any(w in q for w in ["above", "below", "reach", "hit", "exceed", "over", "under", "price"])
+            if val >= 1000 and not (2000 <= val <= 2040 and not is_price_context):
+                target = val
+                break
+            # Also accept 3-digit values for assets like gold or mid-cap prices
+            if val >= 100 and asset in ("GOLD",) and is_price_context:
+                target = val
+                break
+
+    # ── Classify question type ──────────────────────────────────────────────
+    question_type = "price" if target is not None else "event"
+
+    # ── Deadline extraction ─────────────────────────────────────────────────
     deadline_days = 30  # default
     if "week" in q:
         deadline_days = 7
@@ -376,6 +409,7 @@ def parse_polymarket_question(question: str) -> dict:
         "target": target,
         "direction": direction,
         "deadline_days": deadline_days,
+        "question_type": question_type,
     }
 
 
@@ -391,12 +425,32 @@ async def scan_for_opportunities(
     """
     opportunities = []
 
+    event_markets = []  # binary events with no price target
+
     for item in questions:
         q = item.get("question", "")
         market_prob = item.get("market_probability", 0.5)
 
         params = parse_polymarket_question(q)
-        if not params["target"]:
+
+        if params["question_type"] == "event":
+            # Binary event — can't run Monte Carlo, but don't silently drop it.
+            logger.info(f"Auto-scan: binary event market (no price target): '{q[:80]}'")
+            event_markets.append({
+                "question": q,
+                "asset": params["asset"],
+                "question_type": "event",
+                "market_probability": round(market_prob, 3),
+                "actionable": False,
+                "confidence": "N/A",
+                "edge": {"edge_pct": 0, "trade_direction": "MONITOR"},
+                "recommendation": {
+                    "action": "MONITOR",
+                    "reason": "Binary event market — no price target to model quantitatively.",
+                    "position_size_pct": 0,
+                },
+                "computed_at": datetime.now(timezone.utc).isoformat(),
+            })
             continue
 
         try:
@@ -409,14 +463,15 @@ async def scan_for_opportunities(
                 direction=params["direction"],
                 simulations=simulations,
             )
+            result["question_type"] = "price"
             if result["actionable"]:
                 opportunities.append(result)
         except Exception as e:
             logger.error(f"Scan error for '{q}': {e}")
 
-    # Sort by absolute edge
+    # Sort price-target opportunities by absolute edge; append event markets at end
     opportunities.sort(key=lambda x: abs(x["edge"]["edge_pct"]), reverse=True)
-    return opportunities
+    return opportunities + event_markets
 
 
 # ─── POLYMARKET API HELPERS ────────────────────────────────
@@ -485,12 +540,13 @@ async def get_polymarket_market(market_id: str) -> Optional[dict]:
 
 async def auto_scan_polymarket(
     simulations: int = 5000,
-    min_edge_pct: float = 15.0,
+    min_edge_pct: float = 7.0,
     limit: int = 30,
 ) -> list[dict]:
     """
     Autonomous end-to-end scan: fetch trending markets, run Monte Carlo on each,
-    return opportunities whose edge exceeds min_edge_pct.
+    return opportunities whose edge exceeds min_edge_pct, plus binary event markets
+    that couldn't be quantitatively scored.
     """
     markets = await get_trending_markets(limit=limit)
     if not markets:
@@ -508,5 +564,14 @@ async def auto_scan_polymarket(
             prob = 0.5
         questions.append({"question": question, "market_probability": prob})
 
-    opportunities = await scan_for_opportunities(questions, simulations=simulations)
-    return [o for o in opportunities if abs(o.get("edge", {}).get("edge_pct", 0)) >= min_edge_pct]
+    logger.info(f"Auto-scan: fetched {len(markets)} trending markets, extracted {len(questions)} questions")
+    all_results = await scan_for_opportunities(questions, simulations=simulations)
+
+    # Keep price-target results that clear the edge bar, plus all event markets
+    filtered = [
+        o for o in all_results
+        if o.get("question_type") == "event"
+        or abs(o.get("edge", {}).get("edge_pct", 0)) >= min_edge_pct
+    ]
+    logger.info(f"Auto-scan: {len(filtered)} results returned (threshold={min_edge_pct}%)")
+    return filtered
