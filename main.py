@@ -832,6 +832,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
                 ("knowledge", "version", "INTEGER DEFAULT 1"),
                 ("audit_log", "flagged", "BOOLEAN DEFAULT FALSE"),
                 ("users", "anthropic_api_key", "TEXT DEFAULT NULL"),
+                ("users", "provider_keys", "TEXT DEFAULT '{}'"),
             ]
             for table, col, col_type in migration_columns:
                 try:
@@ -997,6 +998,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
             # Migration: add missing columns to SQLite (safe — IF NOT EXISTS not supported, use try/except)
             sqlite_migrations = [
                 ("users", "anthropic_api_key", "TEXT DEFAULT NULL"),
+                ("users", "provider_keys", "TEXT DEFAULT '{}'"),
             ]
             for tbl, col, col_type in sqlite_migrations:
                 try:
@@ -3464,6 +3466,79 @@ async def settings_delete_api_key(request: Request):
         conn.close()
     return {"ok": True, "message": "Anthropic API key removed. Falling back to platform key."}
 
+@app.get("/api/v1/settings/provider-keys")
+async def settings_get_provider_keys(request: Request):
+    """Return which providers the user has keys configured for (never returns actual key values)."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT provider_keys FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        raw = result[0] or "{}"
+        try:
+            keys = json.loads(raw)
+        except Exception:
+            keys = {}
+        return {"connected_providers": list(keys.keys())}
+    finally:
+        conn.close()
+
+@app.post("/api/v1/settings/provider-keys/{provider}")
+async def settings_save_provider_key(provider: str, request: Request):
+    """Save a provider API key for the authenticated user (BYOK)."""
+    from multi_model import PROVIDERS as MM_PROVIDERS
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if provider not in MM_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    body = await request.json()
+    key_value = body.get("api_key","").strip()
+    if not key_value:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT id, provider_keys FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id, raw = result
+        try:
+            keys = json.loads(raw or "{}")
+        except Exception:
+            keys = {}
+        keys[provider] = key_value
+        conn.execute("UPDATE users SET provider_keys=? WHERE id=?", (json.dumps(keys), user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "message": f"{MM_PROVIDERS[provider]['name']} API key saved."}
+
+@app.delete("/api/v1/settings/provider-keys/{provider}")
+async def settings_delete_provider_key(provider: str, request: Request):
+    """Remove a provider API key for the authenticated user."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    if not tok:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    conn = get_db()
+    try:
+        result = conn.execute("SELECT id, provider_keys FROM users WHERE api_key=?", (tok,)).fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id, raw = result
+        try:
+            keys = json.loads(raw or "{}")
+        except Exception:
+            keys = {}
+        keys.pop(provider, None)
+        conn.execute("UPDATE users SET provider_keys=? WHERE id=?", (json.dumps(keys), user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "message": f"Provider key removed."}
+
 @app.get("/api/v1/admin/users")
 async def admin_list_users(current_user: dict = Depends(get_validated_user)):
     if current_user.get("email") not in ["revcole@gmail.com", "admin@swarmsfall.com"] and current_user.get("tier") != "admin":
@@ -4415,21 +4490,43 @@ async def deploy_collab(req: CollabRequest, api_key: str = Depends(get_api_key))
 
 # ─── MODEL ENDPOINTS ─────────────────────────────────────
 
+def _get_user_provider_keys(tok: str) -> dict:
+    """Load the user's saved provider keys from the DB. Returns {} on failure."""
+    if not tok:
+        return {}
+    try:
+        conn = get_db()
+        result = conn.execute("SELECT provider_keys FROM users WHERE api_key=?", (tok,)).fetchone()
+        conn.close()
+        if result and result[0]:
+            return json.loads(result[0])
+    except Exception:
+        pass
+    return {}
+
 @app.get("/api/v1/models")
-async def list_models():
-    """List all available LLM providers and models."""
+async def list_models(request: Request):
+    """List all LLM providers and models. Marks providers as available if env key OR user key is set."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    user_keys = _get_user_provider_keys(tok)
+
     if not MULTI_MODEL or not model_router:
         return {
             "providers": [{
                 "provider": "anthropic",
                 "name": "Anthropic",
-                "available": bool(ANTHROPIC_API_KEY),
+                "available": bool(ANTHROPIC_API_KEY) or "anthropic" in user_keys,
                 "models": [{"model_id": CLAUDE_MODEL, "name": "Claude Haiku 4.5"}],
                 "default_model": CLAUDE_MODEL,
             }],
             "default_model": CLAUDE_MODEL,
         }
     providers = model_router.get_available_providers()
+    # Merge user-specific keys: if a provider isn't available via env but user has their own key, mark available
+    for p in providers:
+        if not p["available"] and p["provider"] in user_keys:
+            p["available"] = True
+            p["user_key"] = True  # flag so frontend knows it's user-supplied
     return {
         "providers": providers,
         "available_count": sum(1 for p in providers if p["available"]),
@@ -4438,14 +4535,17 @@ async def list_models():
 
 
 @app.get("/api/v1/models/available")
-async def list_available_models():
+async def list_available_models(request: Request):
     """List only models that have API keys configured and are ready to use."""
+    tok = request.headers.get("X-Api-Key","") or request.headers.get("Authorization","").replace("Bearer ","")
+    user_keys = _get_user_provider_keys(tok)
+
     if not MULTI_MODEL or not model_router:
         return {"models": [{"model_id": CLAUDE_MODEL, "provider": "anthropic", "name": "Claude Haiku 4.5"}]}
     providers = model_router.get_available_providers()
     models = []
     for p in providers:
-        if p["available"]:
+        if p["available"] or p["provider"] in user_keys:
             for m in p["models"]:
                 m["provider"] = p["provider"]
                 m["provider_name"] = p["name"]
