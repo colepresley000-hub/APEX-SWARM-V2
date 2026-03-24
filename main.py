@@ -1246,6 +1246,7 @@ async def validate_gumroad_license(license_key: str) -> dict:
                 },
             )
         if resp.status_code != 200:
+            logger.error(f"Gumroad API returned HTTP {resp.status_code} for license validation")
             return {"valid": False, "error": "Gumroad API error"}
 
         data = resp.json()
@@ -1254,16 +1255,18 @@ async def validate_gumroad_license(license_key: str) -> dict:
 
         purchase = data.get("purchase", {})
         email = purchase.get("email", "")
-        variants = purchase.get("variants", "")
+        variants = purchase.get("variants", "") or ""  # guard against None
         uses = data.get("uses", 0)
 
         # Determine tier from Gumroad variant or default to starter
         tier = "starter"
-        if "pro" in variants.lower():
-            tier = "pro"
-        elif "enterprise" in variants.lower():
+        variants_lower = variants.lower()
+        if "enterprise" in variants_lower:
             tier = "enterprise"
+        elif "pro" in variants_lower:
+            tier = "pro"
 
+        logger.info(f"Gumroad license validated: email={email} tier={tier} uses={uses}")
         return {"valid": True, "email": email, "tier": tier, "uses": uses}
     except Exception as e:
         logger.error(f"Gumroad validation error: {e}")
@@ -1491,9 +1494,25 @@ async def get_validated_user(x_api_key: str = Header(None), authorization: str =
     if ADMIN_API_KEY and key == ADMIN_API_KEY:
         return {"api_key": key, "tier": "admin", "email": "admin"}
 
-    # Validate license
+    # Check registered users table first (email/password or Google OAuth users)
+    # This must happen before Gumroad so ak-xxx keys don't get sent to Gumroad
+    try:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT email, tier, active FROM users WHERE api_key=?", (key,)
+            ).fetchone()
+            if row and row[2]:  # active
+                return {"api_key": key, "tier": row[1] or "free", "email": row[0]}
+        finally:
+            conn.close()
+    except Exception as _e:
+        logger.error(f"User DB lookup failed in get_validated_user: {_e}")
+
+    # Fall back to Gumroad license validation
     result = await get_or_validate_license(key)
     if not result.get("valid"):
+        logger.warning(f"Auth failed for key prefix {key[:8]}...: {result.get('error', 'invalid')}")
         raise HTTPException(status_code=403, detail=result.get("error", "Invalid license key"))
 
     return {"api_key": key, "tier": result.get("tier", "starter"), "email": result.get("email", "")}
@@ -3503,6 +3522,7 @@ async def settings_save_provider_key(provider: str, request: Request):
     try:
         result = conn.execute("SELECT id, provider_keys FROM users WHERE api_key=?", (tok,)).fetchone()
         if not result:
+            logger.warning(f"Provider key save failed: user not found for key prefix {tok[:8]}...")
             raise HTTPException(status_code=404, detail="User not found")
         user_id, raw = result
         try:
@@ -3512,6 +3532,12 @@ async def settings_save_provider_key(provider: str, request: Request):
         keys[provider] = key_value
         conn.execute("UPDATE users SET provider_keys=? WHERE id=?", (json.dumps(keys), user_id))
         conn.commit()
+        logger.info(f"Provider key saved: provider={provider} user_id={user_id}")
+    except HTTPException:
+        raise
+    except Exception as _e:
+        logger.error(f"Provider key save error: provider={provider} error={_e}")
+        raise HTTPException(status_code=500, detail="Failed to save provider key")
     finally:
         conn.close()
     return {"ok": True, "message": f"{MM_PROVIDERS[provider]['name']} API key saved."}
@@ -3535,6 +3561,12 @@ async def settings_delete_provider_key(provider: str, request: Request):
         keys.pop(provider, None)
         conn.execute("UPDATE users SET provider_keys=? WHERE id=?", (json.dumps(keys), user_id))
         conn.commit()
+        logger.info(f"Provider key removed: provider={provider} user_id={user_id}")
+    except HTTPException:
+        raise
+    except Exception as _e:
+        logger.error(f"Provider key delete error: provider={provider} error={_e}")
+        raise HTTPException(status_code=500, detail="Failed to remove provider key")
     finally:
         conn.close()
     return {"ok": True, "message": f"Provider key removed."}
@@ -4248,9 +4280,13 @@ async def deploy_agent(req: DeployRequest, user_info: dict = Depends(get_validat
             (agent_id, api_key, agent_type, req.task_description, now),
         )
         conn.commit()
+    except Exception as _e:
+        logger.error(f"Failed to persist agent {agent_id} to DB: {_e}")
+        raise HTTPException(status_code=500, detail="Failed to create agent record")
     finally:
         conn.close()
 
+    logger.info(f"Agent deployed: id={agent_id} type={agent_type} tier={user_tier} user={api_key[:8]}...")
     asyncio.create_task(execute_task(agent_id, agent_type, task, api_key, model=req.model))
 
     response = {
@@ -4500,8 +4536,8 @@ def _get_user_provider_keys(tok: str) -> dict:
         conn.close()
         if result and result[0]:
             return json.loads(result[0])
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.error(f"Failed to load provider keys: {_e}")
     return {}
 
 @app.get("/api/v1/models")
