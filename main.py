@@ -7039,11 +7039,57 @@ async function viewMp(slug) {
 }
 async function installMp(id,b){b.innerHTML='<div class="spin"></div>';const r=await api('/api/v1/marketplace/agents/'+id+'/install',{method:'POST'});b.innerHTML='Install';$('#mpRes').innerHTML=r.install_id?'<div style="color:var(--mint)">✓ Installed</div>':`<div style="color:var(--rose)">${r.detail||'Failed'}</div>`;}
 
+// ─── PROVIDER KEY MODAL ──────────────────────────
+function openProviderModal(providerId, providerName) {
+  const existing = document.getElementById('providerKeyModal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'providerKeyModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;width:420px;max-width:90vw">
+    <div style="font-size:16px;font-weight:600;margin-bottom:6px">Connect ${providerName}</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Your key is stored securely and never shared. It will be used for your agents only.</div>
+    <input id="providerKeyInput" class="input" type="password" placeholder="Paste your ${providerName} API key…" style="width:100%;margin-bottom:12px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-sm" onclick="document.getElementById('providerKeyModal').remove()">Cancel</button>
+      <button class="btn btn-mint btn-sm" onclick="saveProviderKey('${providerId}','${providerName}')">Save &amp; Unlock</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.getElementById('providerKeyInput').focus();
+}
+
+async function saveProviderKey(providerId, providerName) {
+  const val = document.getElementById('providerKeyInput').value.trim();
+  if (!val) return;
+  const r = await api(`/api/v1/settings/provider-keys/${providerId}`, {method:'POST', body:JSON.stringify({api_key:val})});
+  document.getElementById('providerKeyModal').remove();
+  if (r.ok) pModels();
+}
+
+async function removeProviderKey(providerId) {
+  await api(`/api/v1/settings/provider-keys/${providerId}`, {method:'DELETE'});
+  pModels();
+}
+
 // ─── MODELS ──────────────────────────
 async function pModels() {
   const r=await api('/api/v1/models');
+  const renderProvider = p => {
+    const header = `<div class="card-head">
+      <div class="card-title"><div class="dot ${p.available?'live':'idle'}"></div>${p.name}${p.user_key?'<span style="font-size:10px;color:var(--mint);margin-left:6px;background:rgba(50,220,150,0.12);padding:2px 7px;border-radius:20px">Your key</span>':''}</div>
+      ${p.available
+        ? `<button class="btn btn-sm" style="font-size:11px;color:var(--text3);background:transparent;border:1px solid var(--border)" onclick="removeProviderKey('${p.provider}')">Disconnect</button>`
+        : `<button class="btn btn-mint btn-sm" style="font-size:11px" onclick="openProviderModal('${p.provider}','${p.name.replace(/'/g,"\\'")}')">+ Connect</button>`}
+    </div>`;
+    const body = p.available
+      ? `<div class="card-body"><div class="g3">${p.models.map(m=>`<div style="background:var(--bg);padding:12px;border-radius:10px"><div style="font-weight:500;font-size:13px">${m.name}${m.vision?' 👁':''}</div><div style="font-size:11px;color:var(--text3);margin-top:4px">${(m.context_window||0).toLocaleString()||'?'} ctx · $${m.cost_per_1m_input}/M</div></div>`).join('')}</div></div>`
+      : `<div class="card-body" style="opacity:0.45;pointer-events:none;filter:blur(1px)"><div class="g3">${p.models.map(m=>`<div style="background:var(--bg);padding:12px;border-radius:10px"><div style="font-weight:500;font-size:13px">${m.name}</div><div style="font-size:11px;color:var(--text3);margin-top:4px">${(m.context_window||0).toLocaleString()} ctx · $${m.cost_per_1m_input}/M</div></div>`).join('')}</div></div>`;
+    return `<div class="card" style="margin-bottom:14px">${header}${body}</div>`;
+  };
   $('#main').innerHTML=`<div class="page fade-up"><div class="page-header"><div class="page-title">AI Models</div><div class="page-subtitle">${r.available_count||1} providers connected · ${r.total_models||3} models available</div></div>
-    ${(r.providers||[]).map(p=>`<div class="card" style="margin-bottom:14px"><div class="card-head"><div class="card-title"><div class="dot ${p.available?'live':'idle'}"></div>${p.name}</div>${!p.available?`<span style="font-size:11px;color:var(--text3)">Add API key to enable</span>`:''}</div>${p.available?`<div class="card-body"><div class="g3">${p.models.map(m=>`<div style="background:var(--bg);padding:12px;border-radius:10px"><div style="font-weight:500;font-size:13px">${m.name}${m.vision?' 👁':''}</div><div style="font-size:11px;color:var(--text3);margin-top:4px">${m.context_window?.toLocaleString()||'?'} ctx · $${m.cost_per_1m_input}/M</div></div>`).join('')}</div></div>`:''}</div>`).join('')}</div>`;
+    ${(r.providers||[]).map(renderProvider).join('')}</div>`;
 }
 
 // ─── ORG CHART ──────────────────────────
