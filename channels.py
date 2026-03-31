@@ -512,6 +512,67 @@ class CommandRouter:
                 pass
             return
 
+        # ─── CONCIERGE — free-form / greeting messages ────────
+        if command is None:
+            text_lower = args.strip().lower()
+            GREETINGS = {
+                "hello", "hi", "hey", "sup", "yo", "hiya", "howdy",
+                "greetings", "what's up", "whats up", "wassup", "start",
+                "help me", "what can you do", "what do you do",
+                "who are you", "what are you", "menu", "options",
+            }
+            is_greeting = (
+                text_lower in GREETINGS
+                or text_lower.rstrip("?! ") in GREETINGS
+                or len(args.split()) <= 2
+            )
+            if is_greeting:
+                concierge = (
+                    "👋 Apex Swarm — 84 AI agents, one command away.\n\n"
+                    "Type /agent-name your task to deploy any agent:\n\n"
+                    "🪙 Crypto & DeFi\n"
+                    "/research  /defi  /token-analysis  /onchain-analyst\n"
+                    "/whale-tracker  /monte-carlo  /portfolio-manager\n"
+                    "/macro-analyst  /nft-analyst  /smart-contract-auditor\n"
+                    "/gas-optimizer  /airdrop-hunter  /yield-hunter\n\n"
+                    "💻 Coding & Dev\n"
+                    "/code-reviewer  /fullstack-dev  /security-analyst\n"
+                    "/python-dev  /js-dev  /devops  /database-architect\n"
+                    "/api-architect  /mobile-dev  /mcp-architect\n"
+                    "/agent-orchestrator  /bot-developer\n\n"
+                    "✍️ Writing & Content\n"
+                    "/blog-writer  /copywriter  /thread-writer  /seo-writer\n"
+                    "/email-writer  /scriptwriter  /ghostwriter  /editor\n"
+                    "/technical-writer  /press-release  /whitepaper-writer\n\n"
+                    "📊 Data & Research\n"
+                    "/data-analyst  /market-researcher  /financial-analyst\n"
+                    "/trend-analyst  /competitor-analyst  /report-writer\n"
+                    "/fact-checker  /web-scraper  /ai-landscape\n\n"
+                    "📈 Business & Strategy\n"
+                    "/startup-advisor  /product-manager  /growth-hacker\n"
+                    "/business-plan  /pitch-coach  /legal-advisor\n"
+                    "/brand-strategist  /pricing-strategist  /agent-economy\n\n"
+                    "⚡ Productivity\n"
+                    "/task-planner  /automation-builder  /workflow-optimizer\n"
+                    "/prompt-engineer  /decision-helper  /learning-coach\n\n"
+                    "🔧 DevOps & Monitoring\n"
+                    "/uptime-monitor  /log-analyzer  /api-tester\n"
+                    "/dependency-scanner  /infra-cost-analyzer  /release-manager\n\n"
+                    "🕵️ Intel & OSINT\n"
+                    "/social-listener  /regulatory-tracker  /dark-web-monitor\n"
+                    "/patent-researcher  /talent-scout  /supply-chain-analyst\n\n"
+                    "📈 Sales & Growth\n"
+                    "/lead-qualifier  /pitch-writer  /churn-predictor\n"
+                    "/pricing-optimizer  /market-sizer\n\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "⚡ Power modes: /skills\n"
+                    "👁️ Live status: /god_eye\n"
+                    "🐝 Swarm task: /swarm your task here\n\n"
+                    "Example: /research What is happening with Bitcoin today?"
+                )
+                await send_to_channel(msg, concierge)
+                return
+
         # ─── AGENT EXECUTION ─────
         agent_type = command or "research"
 
@@ -524,7 +585,11 @@ class CommandRouter:
             task = parts[1] if len(parts) > 1 else "Provide a general update."
 
         if agent_type not in self._agents:
-            agent_type = "research"
+            await send_to_channel(
+                msg,
+                f"❓ Unknown agent '{agent_type}'.\n\nSend 'hello' to see all 84 agents, or try /research, /code-reviewer, /data-analyst, etc."
+            )
+            return
 
         if not task:
             task = "Provide a general update."

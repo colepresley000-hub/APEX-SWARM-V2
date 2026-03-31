@@ -89,7 +89,42 @@ def process_message(message):
         send_message(chat_id, str(result)[:3500])
 
     else:
-        send_message(chat_id, "❌ Unknown command. Use /start to see options.")
+        concierge = (
+            "👋 Apex Swarm — 84 AI agents, one command away.\n\n"
+            "Type /agent-name your task to deploy any agent:\n\n"
+            "🪙 Crypto & DeFi\n"
+            "/research  /defi  /token-analysis  /onchain-analyst\n"
+            "/whale-tracker  /monte-carlo  /portfolio-manager\n"
+            "/macro-analyst  /nft-analyst  /smart-contract-auditor\n"
+            "/gas-optimizer  /airdrop-hunter  /yield-hunter\n\n"
+            "💻 Coding & Dev\n"
+            "/code-reviewer  /fullstack-dev  /security-analyst\n"
+            "/python-dev  /js-dev  /devops  /database-architect\n"
+            "/api-architect  /mobile-dev  /mcp-architect  /agent-orchestrator\n\n"
+            "✍️ Writing & Content\n"
+            "/blog-writer  /copywriter  /thread-writer  /seo-writer\n"
+            "/email-writer  /scriptwriter  /ghostwriter  /technical-writer\n\n"
+            "📊 Data & Research\n"
+            "/data-analyst  /market-researcher  /financial-analyst\n"
+            "/trend-analyst  /competitor-analyst  /fact-checker  /web-scraper\n\n"
+            "📈 Business & Strategy\n"
+            "/startup-advisor  /product-manager  /growth-hacker\n"
+            "/business-plan  /pitch-coach  /agent-economy\n\n"
+            "⚡ Productivity\n"
+            "/task-planner  /automation-builder  /workflow-optimizer  /prompt-engineer\n\n"
+            "🔧 DevOps & Monitoring\n"
+            "/uptime-monitor  /log-analyzer  /api-tester  /release-manager\n\n"
+            "🕵️ Intel & OSINT\n"
+            "/social-listener  /regulatory-tracker  /dark-web-monitor\n\n"
+            "📈 Sales & Growth\n"
+            "/lead-qualifier  /pitch-writer  /churn-predictor  /market-sizer\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "/agents — Full agent list\n"
+            "/run <agent> <task> — Run any agent directly\n"
+            "/swarm <task> — Multi-agent swarm\n\n"
+            "Example: /research What is happening with BTC today?"
+        )
+        send_message(chat_id, concierge)
 
 # -----------------------------
 # MAIN LOOP
