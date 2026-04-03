@@ -5730,6 +5730,7 @@ async def dashboard():
 LANDING_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
+<meta name="google-site-verification" content="Uw2u3OymAa4xqbg7YQguU4sSOWfixHcmu1W4JAa8ptc" />
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>APEX SWARM — Autonomous AI Workforce</title>
