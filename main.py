@@ -2479,6 +2479,18 @@ async def handle_telegram_message(message: dict):
     if not chat_id or not text:
         return
 
+    # ─── HELLO / AGENT LIST ───────────────────────────────────
+    if text.strip().lower() in ("hello", "hi", "hey", "help", "agents", "start", "what can you do", "menu"):
+        lines = ["👋 *ApexSwarm — 85 AI Agents*\nSend `/agent-name your task` to start.\n"]
+        for cat_name, cat_data in AGENT_CATEGORIES.items():
+            lines.append(f"{cat_data['icon']} *{cat_name}*")
+            for key, agent in cat_data["agents"].items():
+                lines.append(f"  `/{key}` — {agent['name']}")
+            lines.append("")
+        lines.append("_Type `/start` for full command list._")
+        await send_telegram(chat_id, "\n".join(lines))
+        return
+
     # Check for slash skills first (e.g. /review, /plan-ceo-review)
     skill_key = None
     skill_data = None
