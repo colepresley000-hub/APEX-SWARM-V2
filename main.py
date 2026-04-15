@@ -158,6 +158,18 @@ except ImportError:
     PROVIDERS = {}
     logger.warning("⚠️ multi_model not found — Anthropic-only mode")
 
+# Cole OS — Brand persona and voice for content agents
+COLE_OS_LOADED = False
+try:
+    from cole_persona import get_cole_system_prompt, get_memory_seeds, COLE_AGENTS
+    COLE_OS_LOADED = True
+    logger.info("✅ Cole OS loaded — brand voice active for content agents")
+except ImportError:
+    COLE_AGENTS = set()
+    def get_cole_system_prompt(base): return base
+    def get_memory_seeds(): return []
+    logger.warning("⚠️ cole_persona not found — agents will use default voice")
+
 # Unified channels (Telegram + Discord + Slack)
 CHANNELS_LOADED = False
 try:
@@ -1887,6 +1899,10 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
             message=task_description[:200],
         ))
 
+    # Inject Cole OS brand voice for content agents
+    if COLE_OS_LOADED and agent_type in COLE_AGENTS:
+        system_prompt = get_cole_system_prompt(system_prompt)
+
     # Inject knowledge
     knowledge = get_knowledge_for_agent(user_api_key, agent_type, task_description)
     if knowledge:
@@ -2509,8 +2525,13 @@ async def handle_telegram_message(message: dict):
         agent_type = parts[0].replace("_", "-")
         task = parts[1] if len(parts) > 1 else "Provide a general update."
     else:
-        agent_type = "research"
-        task = text
+        # Plain text with no slash — guide user instead of defaulting to crypto researcher
+        await send_telegram(chat_id,
+            "👋 Say `hello` to see all 85 agents, or use `/agent-name your task`.\n"
+            "Example: `/research What is Ethereum?`\n"
+            "Type `/start` for full command list."
+        )
+        return
 
     # ─── MISSION CONTROL COMMANDS ─────
     if agent_type == "start":
@@ -2721,7 +2742,11 @@ async def handle_telegram_message(message: dict):
 
     # ─── REGULAR AGENT EXECUTION ─────
     if agent_type not in AGENTS:
-        agent_type = "research"
+        await send_telegram(chat_id,
+            f"❓ Unknown agent `{agent_type}`.\n"
+            "Say `hello` to see all 85 agents, or try `/research`, `/code-reviewer`, `/data-analyst`, etc."
+        )
+        return
 
     agent_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -2823,6 +2848,23 @@ async def lifespan(app: FastAPI):
                 logger.info(f"✅ Telegram webhook registered: {r.json().get('description','')}")
         except Exception as e:
             logger.warning(f"⚠️ Telegram webhook setup failed: {e}")
+
+    # Seed Cole OS into SwarmMemory
+    if COLE_OS_LOADED and SWARM_MEMORY and swarm_memory:
+        try:
+            for seed in get_memory_seeds():
+                await swarm_memory.store(
+                    agent_id="cole-os-seed",
+                    agent_type=seed["agent_type"],
+                    agent_name=seed["agent_name"],
+                    task_description="Cole OS Brand Persona",
+                    result=seed["content"],
+                    user_api_key="system",
+                    namespace=seed["namespace"],
+                )
+            logger.info(f"🧠 Cole OS: {len(get_memory_seeds())} memory seeds loaded into SwarmMemory")
+        except Exception as e:
+            logger.warning(f"⚠️ Cole OS memory seeding failed: {e}")
 
     # Restore persistent daemons
     await restore_daemons()
