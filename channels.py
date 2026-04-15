@@ -61,7 +61,7 @@ async def send_telegram(chat_id, text: str):
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text[:4000]},
+                json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
             )
     except Exception as e:
         logger.error(f"Telegram send failed: {e}")
@@ -221,42 +221,6 @@ class CommandRouter:
         self._get_db = get_db
         self._user_key_col = user_key_col
 
-    async def _execute_and_reply(self, msg, agent_id, agent_type, task):
-        """Execute an agent task and send result back to channel."""
-        try:
-            import asyncio, uuid
-            from datetime import datetime, timezone
-            # We need access to execute_task - import from main context
-            # Use the REST API instead to avoid circular imports
-            import httpx, os
-            base = os.getenv("BASE_URL", "https://swarmsfall.com")
-            api_key = os.getenv("ADMIN_API_KEY", "dev-mode")
-            async with httpx.AsyncClient(timeout=120) as client:
-                # Deploy
-                r = await client.post(f"{base}/api/v1/deploy",
-                    headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-                    json={"agent_type": agent_type, "task_description": task})
-                data = r.json()
-                aid = data.get("agent_id")
-                if not aid:
-                    await send_to_channel(msg, f"Failed to start agent: {data.get('detail','unknown error')}")
-                    return
-                # Poll for result
-                for _ in range(60):
-                    await asyncio.sleep(3)
-                    sr = await client.get(f"{base}/api/v1/status/{aid}",
-                        headers={"X-API-Key": api_key})
-                    sd = sr.json()
-                    if sd.get("status") in ("completed", "failed"):
-                        result = sd.get("result", "No result")
-                        # Send in chunks if long
-                        for i in range(0, len(result), 3800):
-                            await send_to_channel(msg, result[i:i+3800])
-                        return
-                await send_to_channel(msg, "Agent timed out after 3 minutes")
-        except Exception as e:
-            await send_to_channel(msg, f"Error: {str(e)[:200]}")
-
     async def handle(self, msg: ChannelMessage):
         """Route a message to the correct handler."""
         text = msg.text
@@ -272,62 +236,61 @@ class CommandRouter:
             command = None
             args = text
 
-        # ─── SLASH SKILLS (check before anything else) ─────
-        try:
-            from slash_skills import SLASH_SKILLS, parse_slash_command, apply_skill
-            skill_key, remaining = parse_slash_command(text)
-            if skill_key:
-                skill = apply_skill(skill_key, remaining)
-                agent_type = skill["agent_type"]
-                task = skill["system_prompt"] + "\n\n---\nTASK:\n" + remaining
-                await send_to_channel(msg, f"Running {skill['skill']['name']} mode...")
-                import uuid, asyncio
-                from datetime import datetime, timezone
-                agent_id = str(uuid.uuid4())
-                asyncio.create_task(self._execute_and_reply(msg, agent_id, agent_type, task))
-                return
-        except Exception:
-            pass
+        # ─── HELLO / GREETING (plain text, no slash) ─────
+        GREETINGS = {"hello", "hi", "hey", "help", "agents", "start", "what can you do", "menu", "?"}
+        if not command and text.strip().lower() in GREETINGS:
+            if self._agents:
+                lines = ["👋 ApexSwarm — AI Agent Swarm\nSend /agent-name your task to deploy an agent.\n"]
+                # Group agents by category
+                by_cat = {}
+                for key, agent in self._agents.items():
+                    cat = self._agent_to_category.get(key, "Other")
+                    if cat not in by_cat:
+                        by_cat[cat] = []
+                    by_cat[cat].append((key, agent))
+                for cat_name, agents_in_cat in sorted(by_cat.items()):
+                    lines.append(f"{cat_name}")
+                    for key, agent in agents_in_cat:
+                        lines.append(f"  /{key} — {agent['name']}")
+                    lines.append("")
+                lines.append("_Type /start for system commands._")
+                await send_to_channel(msg, "\n".join(lines))
+            else:
+                await send_to_channel(msg, "👋 ApexSwarm — use /research your question, /code-reviewer your code, etc.\nType /start to see commands.")
+            return
+
+        # ─── PLAIN TEXT WITH NO COMMAND — show help ─────
+        if not command:
+            await send_to_channel(msg,
+                "👋 Say hello to see all agents, or use /agent-name your task.\n"
+                "Example: /research What is Ethereum?\n"
+                "Type /start for full command list."
+            )
+            return
 
         # ─── HELP / START ─────
         if command in ("start", "help"):
             version = os.getenv("VERSION", "4.0")
             welcome = (
-                f"APEX SWARM v{version} — Mission Control\n\n"
-                "DEPLOY AGENTS:\n"
-                "/research Your question\n"
+                f"🤖 APEX SWARM v{version} — Mission Control\n\n"
+                "Deploy Agents:\n"
+                "/research Your question here\n"
                 "/crypto-research Analyze ETH\n"
-                "/blog-writer Write about AI\n\n"
-                "MISSION CONTROL:\n"
-                "/god_eye — Live status\n"
-                "/daemons — List daemons\n"
-                "/start_daemon crypto-monitor\n"
-                "/stop_daemon <id>\n"
-                "/subscribe — Live feed\n\n"
-                "SLASH SKILLS:\n"
-                "/skills — See all modes\n"
-                "/review /monetize /ship /analyze"
+                "/blog-writer Write about AI agents\n"
+                "/code-reviewer Review my code\n\n"
+                "Mission Control:\n"
+                "/god_eye — Live swarm status\n"
+                "/daemons — List running daemons\n"
+                "/start_daemon <preset> — Start daemon\n"
+                "/stop_daemon <id> — Stop daemon\n"
+                "/subscribe — Get live feed\n"
+                "/unsubscribe — Stop live feed\n"
+                "/events — Recent activity\n"
+                "/models — Available AI models\n\n"
+                "Daemon Presets:\n"
+                "crypto-monitor, defi-yield-scanner, news-sentinel, whale-watcher, competitor-tracker"
             )
             await send_to_channel(msg, welcome)
-            return
-
-        # ─── SKILLS ──
-        if command == "skills":
-            skills_text = (
-                "APEX SWARM — Slash Skills\n\n"
-                "/plan-ceo-review — Find the 10-star product\n"
-                "/plan-eng-review — Architecture & edge cases\n"
-                "/review — Paranoid code review\n"
-                "/ship — Release checklist & deploy\n"
-                "/browse — QA pass on any URL\n"
-                "/retro — Weekly engineering retro\n"
-                "/analyze — Deep analysis, no surface takes\n"
-                "/draft — Complete first draft, no placeholders\n"
-                "/threat-model — STRIDE security analysis\n"
-                "/monetize — Fastest path to first dollar\n\n"
-                "Usage: /monetize my SaaS idea here"
-            )
-            await send_to_channel(msg, skills_text)
             return
 
         # ─── GOD EYE ─────
@@ -337,20 +300,20 @@ class CommandRouter:
                 return
             stats = self._event_bus.get_stats()
             resp = (
-                "👁️ *GOD EYE — Live Status*\n\n"
-                f"🤖 Active agents: *{stats['active_agents']}*\n"
-                f"👁️ Active daemons: *{stats['active_daemons']}*\n"
-                f"📡 SSE subscribers: *{stats['sse_subscribers']}*\n"
-                f"📊 Total events: *{stats['total_events']}*\n"
+                "👁️ GOD EYE — Live Status\n\n"
+                f"🤖 Active agents: {stats['active_agents']}\n"
+                f"👁️ Active daemons: {stats['active_daemons']}\n"
+                f"📡 SSE subscribers: {stats['sse_subscribers']}\n"
+                f"📊 Total events: {stats['total_events']}\n"
             )
             if stats.get("active_agents_detail"):
-                resp += "\n*Running Agents:*\n"
+                resp += "\nRunning Agents:\n"
                 for aid, info in stats["active_agents_detail"].items():
-                    resp += f"  ⚡ {info['name']} (`{aid[:8]}`)\n"
+                    resp += f"  ⚡ {info['name']} ({aid[:8]})\n"
             if stats.get("active_daemons_detail"):
-                resp += "\n*Running Daemons:*\n"
+                resp += "\nRunning Daemons:\n"
                 for did, info in stats["active_daemons_detail"].items():
-                    resp += f"  👁️ {info['name']} — {info['cycles']} cycles (`{did[:8]}`)\n"
+                    resp += f"  👁️ {info['name']} — {info['cycles']} cycles ({did[:8]})\n"
             await send_to_channel(msg, resp)
             return
 
@@ -363,10 +326,10 @@ class CommandRouter:
             if not daemons:
                 await send_to_channel(msg, "No active daemons. Start one with:\n/start_daemon crypto-monitor")
                 return
-            resp = "👁️ *Active Daemons:*\n\n"
+            resp = "👁️ Active Daemons:\n\n"
             for d in daemons:
                 icon = "🟢" if d["status"] == "running" else "🔴"
-                resp += f"{icon} *{d['agent_name']}*\n  ID: `{d['daemon_id'][:8]}` | Cycles: {d['cycles']} | Every {d['interval_seconds']}s\n\n"
+                resp += f"{icon} {d['agent_name']}\n  ID: {d['daemon_id'][:8]} | Cycles: {d['cycles']} | Every {d['interval_seconds']}s\n\n"
             await send_to_channel(msg, resp)
             return
 
@@ -378,7 +341,7 @@ class CommandRouter:
             preset_id = args.strip().lower()
             if preset_id not in self._daemon_presets:
                 presets = ", ".join(self._daemon_presets.keys())
-                await send_to_channel(msg, f"Unknown preset. Available:\n`{presets}`")
+                await send_to_channel(msg, f"Unknown preset. Available:\n{presets}")
                 return
             preset = self._daemon_presets[preset_id]
             daemon_id = await self._daemon_manager.start_daemon(
@@ -390,7 +353,7 @@ class CommandRouter:
                 alert_conditions=preset.get("alert_conditions", []),
                 user_api_key=msg.user_api_key,
             )
-            await send_to_channel(msg, f"👁️ *{preset['name']}* started\nID: `{daemon_id[:8]}`\nInterval: every {preset['interval_seconds']}s\n\nStop: /stop_daemon {daemon_id[:8]}")
+            await send_to_channel(msg, f"👁️ {preset['name']} started\nID: {daemon_id[:8]}\nInterval: every {preset['interval_seconds']}s\n\nStop: /stop_daemon {daemon_id[:8]}")
             return
 
         # ─── STOP DAEMON ─────
@@ -408,16 +371,16 @@ class CommandRouter:
                 await send_to_channel(msg, f"No daemon found matching {short_id}")
                 return
             await self._daemon_manager.stop_daemon(found)
-            await send_to_channel(msg, f"Daemon {short_id} stopped")
+            await send_to_channel(msg, f"⏹️ Daemon {short_id} stopped")
             return
 
         # ─── SUBSCRIBE / UNSUBSCRIBE ─────
         if command == "subscribe":
             if self._event_bus and msg.platform == "telegram":
                 self._event_bus.add_telegram_chat(int(msg.channel_id))
-                await send_to_channel(msg, "📡 *Subscribed to live feed*\nYou'll receive real-time agent activity.\n/unsubscribe to stop")
+                await send_to_channel(msg, "📡 Subscribed to live feed\nYou'll receive real-time agent activity.\n/unsubscribe to stop")
             elif self._event_bus:
-                await send_to_channel(msg, "Subscribed — live events will be sent to this channel")
+                await send_to_channel(msg, "📡 Subscribed — live events will be sent to this channel")
             return
 
         if command == "unsubscribe":
@@ -435,9 +398,9 @@ class CommandRouter:
             if not events:
                 await send_to_channel(msg, "No recent events.")
                 return
-            resp = "📋 *Recent Events:*\n\n"
+            resp = "📋 Recent Events:\n\n"
             for e in events[-10:]:
-                resp += f"• `{e['event_type']}` — {e['agent_name'] or e['agent_type']}: {e['message'][:80]}\n"
+                resp += f"• {e['event_type']} — {e['agent_name'] or e['agent_type']}: {e['message'][:80]}\n"
             await send_to_channel(msg, resp)
             return
 
@@ -447,12 +410,12 @@ class CommandRouter:
                 from multi_model import model_router
                 providers = model_router.get_available_providers()
                 active = [p for p in providers if p["available"]]
-                resp = f"🧠 *Available Models ({len(active)} providers):*\n\n"
+                resp = f"🧠 Available Models ({len(active)} providers):\n\n"
                 for p in active:
-                    resp += f"*{p['name']}:*\n"
+                    resp += f"{p['name']}:\n"
                     for m in p["models"]:
                         vision = "👁️" if m["vision"] else ""
-                        resp += f"  `{m['model_id']}` {vision}\n"
+                        resp += f"  {m['model_id']} {vision}\n"
                     resp += "\n"
                 resp += "Use: /research model=gpt-4o Your question"
                 await send_to_channel(msg, resp)
@@ -465,7 +428,7 @@ class CommandRouter:
             try:
                 from voice import voice_pipeline
                 voice_pipeline.enable_voice_response(msg.channel_id)
-                await send_to_channel(msg, "🔊 *Voice responses enabled*\nAgent results will be sent as voice messages.\n/voice_off to disable")
+                await send_to_channel(msg, "🔊 Voice responses enabled\nAgent results will be sent as voice messages.\n/voice_off to disable")
             except ImportError:
                 await send_to_channel(msg, "Voice module not available")
             return
@@ -479,8 +442,98 @@ class CommandRouter:
                 pass
             return
 
+        # ─── TWITTER BOT CONTROL ─────────────────────────────────────────────────
+        if command == "twitter":
+            twitterbot_url = os.getenv("TWITTERBOT_URL", "")
+            twitterbot_secret = os.getenv("TWITTERBOT_SECRET", "")
+            sub = args.strip().lower()
+
+            if not twitterbot_url:
+                await send_to_channel(msg,
+                    "⚠️ TwitterBot not configured.\n"
+                    "Set TWITTERBOT_URL in Railway environment variables."
+                )
+                return
+
+            headers = {"x-control-secret": twitterbot_secret} if twitterbot_secret else {}
+
+            try:
+                async with httpx.AsyncClient(timeout=10) as hc:
+
+                    if sub in ("status", ""):
+                        r = await hc.get(f"{twitterbot_url}/status", headers=headers)
+                        d = r.json()
+                        paused = "⏸️ Paused" if d.get("paused") else "▶️ Running"
+                        resp = (
+                            f"🐦 Twitter Bot Status\n\n"
+                            f"State: {paused}\n"
+                            f"Account: {d.get('authenticated_as', 'unknown')}\n"
+                            f"Tweets posted: {d.get('tweets_posted', 0)}\n"
+                            f"Mentions replied: {d.get('mentions_replied', 0)}\n"
+                            f"Tweets liked: {d.get('tweets_liked', 0)}\n"
+                            f"Started: {d.get('started_at', 'N/A')[:19].replace('T', ' ')}\n"
+                        )
+                        if d.get("last_error"):
+                            resp += f"⚠️ Last error: {d['last_error'][:100]}\n"
+                        await send_to_channel(msg, resp)
+
+                    elif sub == "post":
+                        r = await hc.post(f"{twitterbot_url}/tweet/now", headers=headers)
+                        d = r.json()
+                        tweet_text = d.get("text", "")[:200]
+                        await send_to_channel(msg,
+                            f"✅ Tweet posted!\n"
+                            f"ID: {d.get('tweet_id')}\n\n"
+                            f"_{tweet_text}_"
+                        )
+
+                    elif sub.startswith("post "):
+                        custom_text = args[5:].strip()
+                        if not custom_text:
+                            await send_to_channel(msg, "❌ Please provide tweet text: /twitter post Your tweet here")
+                            return
+                        r = await hc.post(
+                            f"{twitterbot_url}/tweet/custom",
+                            headers=headers,
+                            json={"text": custom_text}
+                        )
+                        d = r.json()
+                        await send_to_channel(msg,
+                            f"✅ Custom tweet posted!\n"
+                            f"ID: {d.get('tweet_id')}\n\n"
+                            f"_{custom_text[:200]}_"
+                        )
+
+                    elif sub == "pause":
+                        await hc.post(f"{twitterbot_url}/scheduler/pause", headers=headers)
+                        await send_to_channel(msg,
+                            "⏸️ TwitterBot paused\n"
+                            "Scheduled tweets halted. Resume with /twitter resume."
+                        )
+
+                    elif sub == "resume":
+                        await hc.post(f"{twitterbot_url}/scheduler/resume", headers=headers)
+                        await send_to_channel(msg,
+                            "▶️ TwitterBot resumed\n"
+                            "Scheduled tweets will continue on schedule."
+                        )
+
+                    else:
+                        await send_to_channel(msg,
+                            "🐦 TwitterBot Commands\n\n"
+                            "/twitter status — check bot state & counters\n"
+                            "/twitter post — fire a random tweet now\n"
+                            "/twitter post Your text — post a custom tweet\n"
+                            "/twitter pause — halt scheduled tweets\n"
+                            "/twitter resume — resume schedule"
+                        )
+
+            except Exception as e:
+                await send_to_channel(msg, f"❌ TwitterBot unreachable: {str(e)[:120]}\nCheck that the TwitterBot service is running on Railway.")
+            return
+
         # ─── AGENT EXECUTION ─────
-        agent_type = command or "research"
+        agent_type = command  # command is always set here (we returned early if None above)
 
         # Check for model= prefix in args
         model = None
@@ -491,7 +544,11 @@ class CommandRouter:
             task = parts[1] if len(parts) > 1 else "Provide a general update."
 
         if agent_type not in self._agents:
-            agent_type = "research"
+            await send_to_channel(msg,
+                f"❓ Unknown agent /{agent_type}.\n"
+                "Say hello to see all available agents, or try /research, /code-reviewer, /data-analyst, etc."
+            )
+            return
 
         if not task:
             task = "Provide a general update."
