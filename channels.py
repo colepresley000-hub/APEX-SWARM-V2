@@ -532,6 +532,43 @@ class CommandRouter:
                 await send_to_channel(msg, f"❌ TwitterBot unreachable: {str(e)[:120]}\nCheck that the TwitterBot service is running on Railway.")
             return
 
+        # ─── SKILLS ─────
+        if command == "skills":
+            try:
+                from slash_skills import SLASH_SKILLS
+                skills_text = "APEX SWARM — Slash Skills\n\n"
+                for key, skill in SLASH_SKILLS.items():
+                    skills_text += f"{skill['icon']} {key} — {skill['description']}\n"
+                skills_text += "\nUsage: /monetize my idea here"
+                await send_to_channel(msg, skills_text)
+            except ImportError:
+                await send_to_channel(msg, "Slash skills not available.")
+            return
+
+        # ─── SETKEY ─────
+        if command in ("setkey", "set-key", "set_key"):
+            key = args.strip()
+            if not key.startswith("sk-ant-"):
+                await send_to_channel(msg,
+                    "To set your Anthropic key:\n/setkey sk-ant-YOUR_KEY\n\nGet a free key at console.anthropic.com")
+                return
+            chat_id = msg.channel_id
+            base = os.getenv("BASE_URL", "https://swarmsfall.com")
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    r = await client.post(
+                        f"{base}/api/v1/byok/set-key-by-chat",
+                        json={"chat_id": str(chat_id), "anthropic_key": key},
+                    )
+                if r.status_code == 200:
+                    await send_to_channel(msg,
+                        "Anthropic key saved! Your agents now use your own credits.\nTry: /research what is bitcoin")
+                else:
+                    await send_to_channel(msg, f"Failed to save key: {r.text[:100]}")
+            except Exception as e:
+                await send_to_channel(msg, f"Error saving key: {str(e)[:100]}")
+            return
+
         # ─── AGENT EXECUTION ─────
         agent_type = command  # command is always set here (we returned early if None above)
 
