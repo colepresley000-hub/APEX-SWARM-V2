@@ -106,7 +106,32 @@ railway logs --lines 30
 
 ---
 
+## Telegram Account Linking (as of 2026-04-15)
+
+Full `/connect` flow is live:
+
+### User flow
+1. User goes to swarmsfall.com/dashboard → Settings → "Connect Telegram"
+2. Clicks "Generate Connect Code" → gets a 6-char code (10 min TTL, single-use)
+3. Opens Telegram, sends `/connect YOURCODE` to @ClawdClauBot
+4. Bot calls `POST /api/v1/telegram/connect` → saves `telegram_chat_id` to `users` table
+5. Now `/setkey sk-ant-...` works from Telegram
+
+### Endpoints
+- `POST /api/v1/telegram/generate-connect-token` — authenticated, returns `{token, expires_in, instructions, bot_url}`
+- `POST /api/v1/telegram/connect` — no auth, body `{token, chat_id}`, writes `telegram_chat_id`
+- `GET /api/v1/telegram/status` — authenticated, returns `{connected, chat_id}`
+
+### channels.py handlers
+- `/connect` (no args) — shows step-by-step instructions
+- `/connect <CODE>` — links chat to account
+- `/setkey` now shows helpful "link first with /connect" message if not linked
+
+### Token store
+In-memory dict `_tg_connect_tokens` — survives process lifetime, resets on redeploy. Tokens expire after 10 min. Single-use (consumed on verify).
+
+---
+
 ## Known Issues / TODOs
-- `users.telegram_chat_id` is never populated — the `/connect` Telegram→account linking flow is not built yet. `/setkey` will 404 until it is.
 - Gumroad license validation sometimes returns errors for valid keys (likely rate limiting or network issues on Railway).
 - `cole_persona.py` exists locally but is untracked in git — not deployed to Railway.
