@@ -857,6 +857,19 @@ CREATE TABLE IF NOT EXISTS usage_log (
                 ("users", "telegram_chat_id", "TEXT DEFAULT ''"),
                 ("users", "anthropic_key", "TEXT DEFAULT ''"),
             ]
+            # Ensure connect_tokens table exists (PostgreSQL path)
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS connect_tokens (
+                        token TEXT PRIMARY KEY,
+                        api_key TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                """)
+                conn.commit()
+            except Exception:
+                pass
             for table, col, col_type in migration_columns:
                 try:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
@@ -1030,6 +1043,19 @@ CREATE TABLE IF NOT EXISTS usage_log (
                     logger.info(f"✅ SQLite migration: added {table}.{col}")
                 except Exception:
                     pass  # Column already exists
+            # connect_tokens table
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS connect_tokens (
+                        token TEXT PRIMARY KEY,
+                        api_key TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                """)
+                conn.commit()
+            except Exception:
+                pass
     finally:
         conn.close()
 
@@ -1429,17 +1455,31 @@ async def get_or_validate_license(license_key: str) -> dict:
 
     result = await validate_gumroad_license(license_key)
     if result["valid"]:
-        # Cache the validated license
         conn = get_db()
         try:
             now = datetime.now(timezone.utc).isoformat()
+            # Cache in licenses table
             db_execute(conn,
                 "INSERT INTO licenses (license_key, email, product_id, tier, active, validated_at, created_at) VALUES (?, ?, ?, ?, 1, ?, ?) ON CONFLICT(license_key) DO UPDATE SET active = 1, tier = ?, validated_at = ?",
                 (license_key, result["email"], GUMROAD_PRODUCT_ID, result["tier"], now, now, result["tier"], now),
             )
+            # Ensure a users row exists so Telegram /connect and BYOK work.
+            # Gumroad license key IS the api_key — store it directly.
+            existing = db_fetchone(conn, "SELECT id FROM users WHERE api_key = ?", (license_key,))
+            if not existing:
+                uid = str(uuid.uuid4())
+                email = result.get("email", "") or f"{license_key[:8]}@gumroad.user"
+                db_execute(conn,
+                    "INSERT INTO users (id, email, password_hash, tier, api_key, created_at) VALUES (?, ?, '', ?, ?, ?)",
+                    (uid, email.lower().strip(), result["tier"], license_key, now),
+                )
+                logger.info(f"Auto-created users row for Gumroad license {license_key[:8]}")
+            else:
+                # Keep tier in sync
+                db_execute(conn, "UPDATE users SET tier = ? WHERE api_key = ?", (result["tier"], license_key))
             conn.commit()
         except Exception as e:
-            logger.error(f"License caching failed: {e}")
+            logger.error(f"License caching/user sync failed: {e}")
         finally:
             conn.close()
 
@@ -1529,39 +1569,76 @@ def get_user_anthropic_key(user_api_key: str) -> str:
 
 import random
 import string
-import time as _time
 
-_tg_connect_tokens: dict = {}
 _TOKEN_TTL = 600  # 10 minutes
 
 
+def _ensure_connect_tokens_table():
+    """Create connect_tokens table if it doesn't exist (idempotent)."""
+    conn = get_db()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS connect_tokens (
+                token TEXT PRIMARY KEY,
+                api_key TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"connect_tokens table init: {e}")
+    finally:
+        conn.close()
+
+
 def _generate_connect_token(api_key: str) -> str:
-    """Create a fresh 6-char connect token for this user, purging expired ones."""
-    # Purge expired tokens
-    now = _time.time()
-    expired = [t for t, v in _tg_connect_tokens.items() if v["expires_at"] < now]
-    for t in expired:
-        del _tg_connect_tokens[t]
-    # Revoke any existing token for this user
-    stale = [t for t, v in _tg_connect_tokens.items() if v["api_key"] == api_key]
-    for t in stale:
-        del _tg_connect_tokens[t]
-    # New token
+    """Create a fresh 6-char connect token, persisted to DB."""
+    _ensure_connect_tokens_table()
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
+    expires_at = (now_dt.replace(microsecond=0) + __import__('datetime').timedelta(seconds=_TOKEN_TTL)).isoformat()
     token = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    _tg_connect_tokens[token] = {"api_key": api_key, "expires_at": now + _TOKEN_TTL}
+    conn = get_db()
+    try:
+        # Revoke existing tokens for this user and purge all expired
+        conn.execute("DELETE FROM connect_tokens WHERE api_key = ? OR expires_at < ?", (api_key, now))
+        conn.execute(
+            "INSERT INTO connect_tokens (token, api_key, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            (token, api_key, expires_at, now),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"_generate_connect_token DB error: {e}")
+    finally:
+        conn.close()
     return token
 
 
 def _consume_connect_token(token: str) -> str | None:
-    """Verify and consume a connect token. Returns api_key or None."""
-    entry = _tg_connect_tokens.get(token.upper())
-    if not entry:
+    """Verify and consume a connect token from DB. Returns api_key or None."""
+    _ensure_connect_tokens_table()
+    token = token.upper()
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT api_key, expires_at FROM connect_tokens WHERE token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return None
+        if row[1] < now:
+            conn.execute("DELETE FROM connect_tokens WHERE token = ?", (token,))
+            conn.commit()
+            return None
+        conn.execute("DELETE FROM connect_tokens WHERE token = ?", (token,))
+        conn.commit()
+        return row[0]
+    except Exception as e:
+        logger.error(f"_consume_connect_token DB error: {e}")
         return None
-    if entry["expires_at"] < _time.time():
-        del _tg_connect_tokens[token.upper()]
-        return None
-    del _tg_connect_tokens[token.upper()]
-    return entry["api_key"]
+    finally:
+        conn.close()
 
 
 async def restore_daemons():
@@ -1673,23 +1750,6 @@ async def get_validated_user(x_api_key: str = Header(None), authorization: str =
 
 # ─── ENTERPRISE ORG AUTH ─────────────────────────────────
 
-def get_member_by_key(api_key: str):
-    """Look up org member by their API key."""
-    conn = get_db()
-    try:
-        row = db_fetchone(conn,
-            "SELECT m.id, m.org_id, m.email, m.role, o.name as org_name, o.tier, o.slack_webhook, o.slack_channel "
-            "FROM org_members m JOIN orgs o ON m.org_id = o.id WHERE m.api_key = ?",
-            (api_key,)
-        )
-        if row:
-            return {"member_id": row[0], "org_id": row[1], "email": row[2],
-                    "role": row[3], "org_name": row[4], "tier": row[5],
-                    "slack_webhook": row[6], "slack_channel": row[7]}
-        return None
-    finally:
-        conn.close()
-
 def get_org_by_id(org_id: str):
     conn = get_db()
     try:
@@ -1746,69 +1806,6 @@ class UpdateOrgRequest(BaseModel):
     slack_webhook: Optional[str] = None
     slack_channel: Optional[str] = None
     name: Optional[str] = None
-
-
-# ─── USER + ORG AUTH ─────────────────────────────────────
-
-import hashlib as _hl, hmac as _hm, base64 as _b64, json as _json
-
-def hash_password(pw):
-    salt = os.urandom(16)
-    dk = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
-    return _b64.b64encode(salt + dk).decode()
-
-def verify_password(pw, stored):
-    try:
-        raw = _b64.b64decode(stored.encode())
-        salt, dk = raw[:16], raw[16:]
-        check = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
-        return _hm.compare_digest(dk, check)
-    except Exception:
-        return False
-
-def make_token(user_id):
-    p = _json.dumps({"u": user_id, "t": datetime.now(timezone.utc).isoformat()})
-    s = _hm.new(JWT_SECRET.encode(), p.encode(), _hl.sha256).hexdigest()
-    return _b64.urlsafe_b64encode((p + "|" + s).encode()).decode()
-
-def get_user_by_token(token):
-    try:
-        conn = get_db()
-        now = datetime.now(timezone.utc).isoformat()
-        row = db_fetchone(conn,
-            "SELECT s.user_id,u.email,u.tier,u.api_key,u.org_id,u.role FROM sessions s "
-            "JOIN users u ON s.user_id=u.id WHERE s.token=? AND s.expires_at>?",
-            (token, now))
-        conn.close()
-        if row:
-            return {"user_id":row[0],"email":row[1],"tier":row[2],"api_key":row[3],"org_id":row[4],"role":row[5]}
-        return None
-    except Exception:
-        return None
-
-def get_member_by_key(api_key):
-    conn = get_db()
-    try:
-        row = db_fetchone(conn,
-            "SELECT m.id,m.org_id,m.email,m.role,o.name,o.tier,o.slack_webhook,o.slack_channel "
-            "FROM org_members m JOIN orgs o ON m.org_id=o.id WHERE m.api_key=?",
-            (api_key,))
-        if row:
-            return {"member_id":row[0],"org_id":row[1],"email":row[2],"role":row[3],
-                    "org_name":row[4],"tier":row[5],"slack_webhook":row[6],"slack_channel":row[7]}
-        return None
-    finally:
-        conn.close()
-
-def log_audit(user_email, action, resource="", detail="", user_id="", org_id="", ip=""):
-    try:
-        conn = get_db()
-        db_execute(conn, "INSERT INTO audit_log (id,user_id,user_email,org_id,action,resource,detail,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                   (str(uuid.uuid4()),user_id,user_email,org_id,action,resource,str(detail)[:500],ip,datetime.now(timezone.utc).isoformat()))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error("Audit: " + str(e))
 
 
 # ─── USER + ORG AUTH ─────────────────────────────────────
@@ -2031,12 +2028,15 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
             except Exception:
                 pass
 
+        # Resolve API key: use user's BYOK key if set, else platform key
+        resolved_api_key = get_user_anthropic_key(user_api_key)
+
         if TOOLS_AVAILABLE:
             tools = get_tools_for_agent(category)
             # Use requested model, or env default, or auto-select
             selected_model = model or CLAUDE_MODEL
             result = await execute_with_tools(
-                api_key=ANTHROPIC_API_KEY,
+                api_key=resolved_api_key,
                 model=selected_model,
                 system_prompt=system_prompt,
                 user_message=task_description,
@@ -2053,7 +2053,7 @@ async def execute_task(agent_id: str, agent_type: str, task_description: str, us
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": ANTHROPIC_API_KEY,
+                        "x-api-key": resolved_api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
@@ -3048,119 +3048,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="APEX SWARM", version=VERSION, lifespan=lifespan)
 
-@app.post("/api/v1/orgs")
-async def create_org(req: CreateOrgRequest, api_key: str = Depends(get_api_key)):
-    """Create a new organization."""
-    import re
-    slug = re.sub(r'[^a-z0-9-]', '-', req.slug.lower()).strip('-')
-    org_id = str(uuid.uuid4())
-    member_id = str(uuid.uuid4())
-    member_key = f"ak-{str(uuid.uuid4()).replace('-', '')[:32]}"
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn, "INSERT INTO orgs (id, name, slug, tier, owner_email, slack_webhook, slack_channel, created_at) VALUES (?, ?, ?, 'enterprise', ?, ?, ?, ?)",
-                   (org_id, req.name, slug, req.owner_email, req.slack_webhook or "", req.slack_channel or "", now))
-        db_execute(conn, "INSERT INTO org_members (id, org_id, email, role, api_key, joined_at, created_at) VALUES (?, ?, ?, 'owner', ?, ?, ?)",
-                   (member_id, org_id, req.owner_email, member_key, now, now))
-        conn.commit()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-    return {"org_id": org_id, "slug": slug, "owner_api_key": member_key, "message": f"Organization '{req.name}' created"}
-
-@app.get("/api/v1/orgs/{org_id}")
-async def get_org(org_id: str, api_key: str = Depends(get_api_key)):
-    org = get_org_by_id(org_id)
-    if not org:
-        raise HTTPException(status_code=404, detail="Org not found")
-    conn = get_db()
-    try:
-        members = db_fetchall(conn, "SELECT id, email, role, api_key, joined_at FROM org_members WHERE org_id = ?", (org_id,))
-    finally:
-        conn.close()
-    return {"org": org, "members": [{"id": m[0], "email": m[1], "role": m[2], "api_key": m[3][:8]+"...", "joined_at": m[4]} for m in members]}
-
-@app.put("/api/v1/orgs/{org_id}")
-async def update_org(org_id: str, req: UpdateOrgRequest, api_key: str = Depends(get_api_key)):
-    conn = get_db()
-    try:
-        if req.slack_webhook is not None:
-            db_execute(conn, "UPDATE orgs SET slack_webhook = ? WHERE id = ?", (req.slack_webhook, org_id))
-        if req.slack_channel is not None:
-            db_execute(conn, "UPDATE orgs SET slack_channel = ? WHERE id = ?", (req.slack_channel, org_id))
-        if req.name is not None:
-            db_execute(conn, "UPDATE orgs SET name = ? WHERE id = ?", (req.name, org_id))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"status": "updated"}
-
-@app.post("/api/v1/orgs/{org_id}/invite")
-async def invite_member(org_id: str, req: InviteMemberRequest, api_key: str = Depends(get_api_key)):
-    """Invite a team member to the org."""
-    token = str(uuid.uuid4()).replace("-", "")
-    invite_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-    expires = datetime.fromtimestamp(now.timestamp() + 7*24*3600, tz=timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn, "INSERT INTO org_invites (id, org_id, email, role, token, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                   (invite_id, org_id, req.email, req.role, token, api_key, expires, now.isoformat()))
-        conn.commit()
-    finally:
-        conn.close()
-    base_url = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
-    invite_url = f"{base_url}/accept-invite?token={token}"
-    return {"invite_url": invite_url, "token": token, "email": req.email, "expires_at": expires}
-
-@app.post("/api/v1/orgs/accept-invite")
-async def accept_invite(req: AcceptInviteRequest):
-    """Accept an org invite and get an API key."""
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        invite = db_fetchone(conn, "SELECT id, org_id, email, role, expires_at, used FROM org_invites WHERE token = ?", (req.token,))
-        if not invite:
-            raise HTTPException(status_code=404, detail="Invite not found")
-        if invite[5]:
-            raise HTTPException(status_code=400, detail="Invite already used")
-        if invite[4] < now:
-            raise HTTPException(status_code=400, detail="Invite expired")
-        member_id = str(uuid.uuid4())
-        member_key = f"ak-{str(uuid.uuid4()).replace('-', '')[:32]}"
-        db_execute(conn, "INSERT INTO org_members (id, org_id, email, role, api_key, joined_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   (member_id, invite[1], req.email, invite[2], member_key, now, now))
-        db_execute(conn, "UPDATE org_invites SET used = 1 WHERE id = ?", (invite[0],))
-        conn.commit()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-    return {"api_key": member_key, "org_id": invite[1], "role": invite[2], "message": "Welcome to the team!"}
-
-@app.get("/api/v1/orgs/{org_id}/members")
-async def list_members(org_id: str, api_key: str = Depends(get_api_key)):
-    conn = get_db()
-    try:
-        members = db_fetchall(conn, "SELECT id, email, role, api_key, joined_at FROM org_members WHERE org_id = ?", (org_id,))
-    finally:
-        conn.close()
-    return {"members": [{"id": m[0], "email": m[1], "role": m[2], "api_key": m[3][:8]+"...", "joined_at": m[4]} for m in members]}
-
-@app.delete("/api/v1/orgs/{org_id}/members/{member_id}")
-async def remove_member(org_id: str, member_id: str, api_key: str = Depends(get_api_key)):
-    conn = get_db()
-    try:
-        db_execute(conn, "DELETE FROM org_members WHERE id = ? AND org_id = ?", (member_id, org_id))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"status": "removed"}
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -3169,390 +3056,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ─── API ENDPOINTS ────────────────────────────────────────
-
-
-# ─── AUTH ENDPOINTS ────────────────────────────────────────
-
-class SignupRequest(BaseModel):
-    email: str
-    password: str
-    name: Optional[str] = ""
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-@app.post("/api/v1/auth/signup")
-async def auth_signup(req: SignupRequest, request: Request):
-    if len(req.password) < 8:
-        raise HTTPException(400, "Password must be at least 8 characters")
-    uid = str(uuid.uuid4())
-    ak = "ak-" + str(uuid.uuid4()).replace("-","")[:32]
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,created_at) VALUES (?,?,?,'free',?,?)",
-                   (uid,req.email.lower().strip(),hash_password(req.password),ak,now))
-        conn.commit()
-    except Exception as e:
-        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
-            raise HTTPException(400,"Email already registered")
-        raise HTTPException(400,str(e))
-    finally:
-        conn.close()
-    tok = make_token(uid)
-    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
-                   (str(uuid.uuid4()),uid,tok,exp,now))
-        conn.commit()
-    finally:
-        conn.close()
-    log_audit(req.email,"signup","user",uid,uid,"",(request.client.host if request.client else ""))
-    return {"token":tok,"api_key":ak,"email":req.email,"tier":"free"}
-
-@app.post("/api/v1/auth/login")
-async def auth_login(req: LoginRequest, request: Request):
-    conn = get_db()
-    try:
-        row = db_fetchone(conn,"SELECT id,email,password_hash,tier,api_key,org_id,role,active FROM users WHERE email=?",
-                         (req.email.lower().strip(),))
-    finally:
-        conn.close()
-    if not row or not row[7]:
-        raise HTTPException(401,"Invalid email or password")
-    if not verify_password(req.password,row[2]):
-        raise HTTPException(401,"Invalid email or password")
-    tok = make_token(row[0])
-    now = datetime.now(timezone.utc).isoformat()
-    exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
-                   (str(uuid.uuid4()),row[0],tok,exp,now))
-        conn.commit()
-    finally:
-        conn.close()
-    log_audit(row[1],"login","session","",row[0],row[5] or "",(request.client.host if request.client else ""))
-    return {"token":tok,"api_key":row[4],"email":row[1],"tier":row[3],"org_id":row[5],"role":row[6]}
-
-@app.post("/api/v1/auth/logout")
-async def auth_logout(request: Request):
-    tok = request.headers.get("X-Session-Token","")
-    if tok:
-        conn = get_db()
-        try:
-            db_execute(conn,"DELETE FROM sessions WHERE token=?",(tok,))
-            conn.commit()
-        finally:
-            conn.close()
-    return {"status":"logged out"}
-
-@app.get("/api/v1/auth/me")
-async def auth_me(request: Request):
-    tok = request.headers.get("X-Session-Token","") or request.headers.get("Authorization","").replace("Bearer ","")
-    if not tok:
-        raise HTTPException(401,"Not authenticated")
-    user = get_user_by_token(tok)
-    if not user:
-        raise HTTPException(401,"Invalid or expired session")
-    return user
-
-@app.get("/api/v1/auth/google")
-async def google_start():
-    if not GOOGLE_CLIENT_ID:
-        raise HTTPException(400,"Google OAuth not configured. Set GOOGLE_CLIENT_ID env var.")
-    from urllib.parse import urlencode
-    from fastapi.responses import RedirectResponse
-    params = {"client_id":GOOGLE_CLIENT_ID,"redirect_uri":BASE_URL+"/api/v1/auth/google/callback",
-              "response_type":"code","scope":"openid email profile","access_type":"offline"}
-    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?"+urlencode(params))
-
-@app.get("/api/v1/auth/google/callback")
-async def google_callback(code: str = None, error: str = None):
-    from fastapi.responses import RedirectResponse, HTMLResponse as _HR
-    if error or not code:
-        return RedirectResponse("/login?error=google_failed")
-    try:
-        async with httpx.AsyncClient() as client:
-            tr = await client.post("https://oauth2.googleapis.com/token",data={
-                "code":code,"client_id":GOOGLE_CLIENT_ID,"client_secret":GOOGLE_CLIENT_SECRET,
-                "redirect_uri":BASE_URL+"/api/v1/auth/google/callback","grant_type":"authorization_code"})
-            tokens = tr.json()
-            ur = await client.get("https://www.googleapis.com/oauth2/v2/userinfo",
-                headers={"Authorization":"Bearer "+tokens.get("access_token","")})
-            gu = ur.json()
-        email = gu.get("email","")
-        gid = gu.get("id","")
-        if not email:
-            return RedirectResponse("/login?error=no_email")
-        conn = get_db()
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            row = db_fetchone(conn,"SELECT id,api_key,tier FROM users WHERE email=?",(email,))
-            if row:
-                uid,ak,tier = row[0],row[1],row[2]
-                db_execute(conn,"UPDATE users SET google_id=? WHERE id=?",(gid,uid))
-            else:
-                uid = str(uuid.uuid4())
-                ak = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
-                db_execute(conn,"INSERT INTO users (id,email,password_hash,tier,api_key,google_id,created_at) VALUES (?,?,?,'free',?,?,?)",
-                           (uid,email,"",ak,gid,now))
-                tier = "free"
-            stok = make_token(uid)
-            exp = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+30*86400,tz=timezone.utc).isoformat()
-            db_execute(conn,"INSERT INTO sessions (id,user_id,token,expires_at,created_at) VALUES (?,?,?,?,?)",
-                       (str(uuid.uuid4()),uid,stok,exp,now))
-            conn.commit()
-        finally:
-            conn.close()
-        log_audit(email,"google_login","session",gid,uid,"")
-        return _HR(
-            "<script>"
-            "localStorage.setItem('apex_token','" + stok + "');"
-            "localStorage.setItem('apex_key','" + ak + "');"
-            "localStorage.setItem('apex_email','" + email + "');"
-            "window.location.href='/dashboard';</script>"
-        )
-    except Exception as e:
-        logger.error("Google OAuth: "+str(e))
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse("/login?error=oauth_error")
-
-# ─── BILLING ────────────────────────────────────────────
-
-@app.post("/api/v1/billing/checkout")
-async def billing_checkout(request: Request):
-    if not STRIPE_SECRET_KEY:
-        raise HTTPException(400,"Stripe not configured. Add STRIPE_SECRET_KEY to env vars.")
-    data = await request.json()
-    tier = data.get("tier","starter")
-    tok = request.headers.get("X-Session-Token","")
-    user = get_user_by_token(tok)
-    if not user:
-        raise HTTPException(401,"Not authenticated")
-    pm = {"starter":STRIPE_STARTER_PRICE,"pro":STRIPE_PRO_PRICE,"enterprise":STRIPE_ENTERPRISE_PRICE}
-    pid = pm.get(tier)
-    if not pid:
-        raise HTTPException(400,"Invalid tier")
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.post("https://api.stripe.com/v1/checkout/sessions",
-                auth=(STRIPE_SECRET_KEY,""),
-                data={"mode":"subscription","line_items[0][price]":pid,"line_items[0][quantity]":"1",
-                      "customer_email":user["email"],
-                      "success_url":BASE_URL+"/dashboard?upgraded=1",
-                      "cancel_url":BASE_URL+"/pricing",
-                      "metadata[user_id]":user["user_id"],"metadata[tier]":tier})
-            res = r.json()
-            return {"checkout_url":res.get("url"),"session_id":res.get("id")}
-    except Exception as e:
-        raise HTTPException(500,str(e))
-
-@app.post("/api/v1/billing/webhook")
-async def billing_webhook(request: Request):
-    try:
-        payload = await request.body()
-        event = _json.loads(payload)
-        etype = event.get("type","")
-        if etype in ("checkout.session.completed","customer.subscription.updated"):
-            obj = event.get("data",{}).get("object",{})
-            uid = obj.get("metadata",{}).get("user_id","")
-            tier = obj.get("metadata",{}).get("tier","starter")
-            cid = obj.get("customer","")
-            sid = obj.get("subscription",obj.get("id",""))
-            if uid:
-                conn = get_db()
-                try:
-                    db_execute(conn,"UPDATE users SET tier=?,stripe_customer_id=?,stripe_subscription_id=? WHERE id=?",(tier,cid,sid,uid))
-                    conn.commit()
-                finally:
-                    conn.close()
-    except Exception as e:
-        logger.error("Stripe webhook: "+str(e))
-    return {"received":True}
-
-@app.get("/api/v1/billing/status")
-async def billing_status(request: Request):
-    tok = request.headers.get("X-Session-Token","")
-    user = get_user_by_token(tok)
-    tier = user["tier"] if user else "free"
-    limits = TIER_LIMITS.get(tier,{})
-    return {"tier":tier,"limits":limits}
-
-# ─── AUDIT LOG ──────────────────────────────────────────
-
-@app.get("/api/v1/audit/logs")
-async def get_audit_logs(request: Request, limit: int=100, offset: int=0):
-    conn = get_db()
-    try:
-        rows = db_fetchall(conn,
-            "SELECT id,user_email,org_id,action,resource,detail,ip,created_at FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit,offset))
-        total = db_fetchone(conn,"SELECT COUNT(*) FROM audit_log",())[0]
-    finally:
-        conn.close()
-    return {"logs":[{"id":r[0],"user":r[1],"org_id":r[2],"action":r[3],"resource":r[4],"detail":r[5],"ip":r[6],"ts":r[7]} for r in rows],"total":total}
-
-# ─── ORG MANAGEMENT ─────────────────────────────────────
-
-class CreateOrgRequest(BaseModel):
-    name: str
-    slug: str
-    owner_email: str
-    slack_webhook: Optional[str] = ""
-    slack_channel: Optional[str] = ""
-
-class InviteMemberRequest(BaseModel):
-    email: str
-    role: str = "member"
-
-class AcceptInviteRequest(BaseModel):
-    token: str
-    email: str
-
-@app.post("/api/v1/orgs")
-async def create_org(req: CreateOrgRequest, api_key: str = Depends(get_api_key)):
-    import re as _re
-    slug = _re.sub(r'[^a-z0-9-]','-',req.slug.lower()).strip('-')
-    oid = str(uuid.uuid4())
-    mid = str(uuid.uuid4())
-    mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn,"INSERT INTO orgs (id,name,slug,tier,owner_email,slack_webhook,slack_channel,created_at) VALUES (?,?,?,'enterprise',?,?,?,?)",
-                   (oid,req.name,slug,req.owner_email,req.slack_webhook or "",req.slack_channel or "",now))
-        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,'owner',?,?,?)",
-                   (mid,oid,req.owner_email,mk,now,now))
-        conn.commit()
-    except Exception as e:
-        raise HTTPException(400,str(e))
-    finally:
-        conn.close()
-    return {"org_id":oid,"slug":slug,"owner_api_key":mk,"message":"Organization created"}
-
-@app.post("/api/v1/orgs/{org_id}/invite")
-async def invite_member(org_id: str, req: InviteMemberRequest, api_key: str = Depends(get_api_key)):
-    tok = str(uuid.uuid4()).replace("-","")
-    iid = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
-    exp = datetime.fromtimestamp(now.timestamp()+7*86400,tz=timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        db_execute(conn,"INSERT INTO org_invites (id,org_id,email,role,token,created_by,expires_at,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                   (iid,org_id,req.email,req.role,tok,api_key,exp,now.isoformat()))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"invite_url":BASE_URL+"/accept-invite?token="+tok,"token":tok,"email":req.email,"expires_at":exp}
-
-@app.post("/api/v1/orgs/accept-invite")
-async def accept_invite(req: AcceptInviteRequest):
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        inv = db_fetchone(conn,"SELECT id,org_id,email,role,expires_at,used FROM org_invites WHERE token=?",(req.token,))
-        if not inv:
-            raise HTTPException(404,"Invite not found")
-        if inv[5]:
-            raise HTTPException(400,"Invite already used")
-        if inv[4] < now:
-            raise HTTPException(400,"Invite expired")
-        mid = str(uuid.uuid4())
-        mk = "ak-"+str(uuid.uuid4()).replace("-","")[:32]
-        db_execute(conn,"INSERT INTO org_members (id,org_id,email,role,api_key,joined_at,created_at) VALUES (?,?,?,?,?,?,?)",
-                   (mid,inv[1],req.email,inv[3],mk,now,now))
-        db_execute(conn,"UPDATE org_invites SET used=1 WHERE id=?",(inv[0],))
-        conn.commit()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(400,str(e))
-    finally:
-        conn.close()
-    return {"api_key":mk,"org_id":inv[1],"role":inv[3],"message":"Welcome to the team!"}
-
-@app.get("/api/v1/orgs/{org_id}")
-async def get_org(org_id: str, api_key: str = Depends(get_api_key)):
-    conn = get_db()
-    try:
-        org = db_fetchone(conn,"SELECT id,name,slug,tier,owner_email,slack_webhook,slack_channel FROM orgs WHERE id=?",(org_id,))
-        members = db_fetchall(conn,"SELECT id,email,role,api_key,joined_at FROM org_members WHERE org_id=?",(org_id,))
-    finally:
-        conn.close()
-    if not org:
-        raise HTTPException(404,"Org not found")
-    return {"org":{"id":org[0],"name":org[1],"slug":org[2],"tier":org[3]},
-            "members":[{"id":m[0],"email":m[1],"role":m[2],"api_key":m[3][:8]+"...","joined_at":m[4]} for m in members]}
-
-# ─── SLACK CONFIG ────────────────────────────────────────
-
-@app.post("/api/v1/slack/configure")
-async def configure_slack(request: Request, api_key: str = Depends(get_api_key)):
-    data = await request.json()
-    webhook = data.get("webhook_url","")
-    channel = data.get("channel","#ai-workforce")
-    member = get_member_by_key(api_key)
-    if member:
-        conn = get_db()
-        try:
-            db_execute(conn,"UPDATE orgs SET slack_webhook=?,slack_channel=? WHERE id=?",(webhook,channel,member["org_id"]))
-            conn.commit()
-        finally:
-            conn.close()
-        return {"status":"configured","scope":"org"}
-    return {"status":"configured","scope":"global"}
-
-@app.post("/api/v1/slack/test")
-async def test_slack(request: Request):
-    data = await request.json()
-    webhook = data.get("webhook_url") or SLACK_WEBHOOK_URL
-    if not webhook:
-        raise HTTPException(400,"No Slack webhook configured")
-    ok = await send_slack_message("APEX SWARM connected to Slack! Your AI workforce is ready.",webhook_url=webhook)
-    return {"success":ok}
-
-@app.post("/api/v1/slack/commands")
-async def slack_commands(request: Request):
-    form = await request.form()
-    text = (form.get("text") or "").strip()
-    user_name = form.get("user_name","unknown")
-    response_url = form.get("response_url","")
-    parts = text.split(None,2)
-    action = parts[0].lower() if parts else "help"
-    async def respond(msg):
-        if response_url:
-            try:
-                async with httpx.AsyncClient(timeout=5) as c:
-                    await c.post(response_url,json={"text":msg,"response_type":"in_channel"})
-            except Exception:
-                pass
-    if action == "deploy" and len(parts) >= 3:
-        agent_type = parts[1]
-        task = parts[2]
-        asyncio.create_task(respond("Deploying " + agent_type + " for: " + task))
-        try:
-            result = await execute_task(agent_type,task,"slack-"+user_name)
-            await respond(agent_type + " result: " + (result or "")[:500])
-        except Exception as e:
-            await respond("Error: "+str(e))
-        return {"response_type":"in_channel","text":"Processing..."}
-    elif action == "status":
-        running = [d for d in active_daemons.values() if d.get("status")=="running"]
-        return {"response_type":"in_channel","text":"APEX SWARM: "+str(len(running))+" workers active"}
-    elif action == "stop" and len(parts) >= 2:
-        did = parts[1]
-        if did in active_daemons:
-            active_daemons[did]["status"] = "stopped"
-            return {"response_type":"in_channel","text":"Stopped "+did[:8]}
-        return {"response_type":"in_channel","text":"Worker not found"}
-    return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
-
 
 # ─── AUTH ENDPOINTS ────────────────────────────────────────
 
