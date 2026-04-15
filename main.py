@@ -1523,6 +1523,47 @@ def get_user_anthropic_key(user_api_key: str) -> str:
     return ANTHROPIC_API_KEY
 
 
+# ─── TELEGRAM CONNECT TOKENS ────────────────────────────────
+# Short-lived in-memory tokens for linking Telegram chat_id to a user account.
+# Format: {token_str: {"api_key": str, "expires_at": float}}
+
+import random
+import string
+import time as _time
+
+_tg_connect_tokens: dict = {}
+_TOKEN_TTL = 600  # 10 minutes
+
+
+def _generate_connect_token(api_key: str) -> str:
+    """Create a fresh 6-char connect token for this user, purging expired ones."""
+    # Purge expired tokens
+    now = _time.time()
+    expired = [t for t, v in _tg_connect_tokens.items() if v["expires_at"] < now]
+    for t in expired:
+        del _tg_connect_tokens[t]
+    # Revoke any existing token for this user
+    stale = [t for t, v in _tg_connect_tokens.items() if v["api_key"] == api_key]
+    for t in stale:
+        del _tg_connect_tokens[t]
+    # New token
+    token = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    _tg_connect_tokens[token] = {"api_key": api_key, "expires_at": now + _TOKEN_TTL}
+    return token
+
+
+def _consume_connect_token(token: str) -> str | None:
+    """Verify and consume a connect token. Returns api_key or None."""
+    entry = _tg_connect_tokens.get(token.upper())
+    if not entry:
+        return None
+    if entry["expires_at"] < _time.time():
+        del _tg_connect_tokens[token.upper()]
+        return None
+    del _tg_connect_tokens[token.upper()]
+    return entry["api_key"]
+
+
 async def restore_daemons():
     """Restart enabled daemons from DB after deploy."""
     if not MISSION_CONTROL:
@@ -4217,6 +4258,82 @@ async def byok_status(api_key: str = Depends(get_api_key)):
         conn.close()
     has_key = bool(row and row[0] and row[0].startswith("sk-ant-"))
     return {"byok_active": has_key}
+
+
+@app.post("/api/v1/byok/set-key")
+async def byok_set_key(request: Request, api_key: str = Depends(get_api_key)):
+    """Save user's Anthropic key server-side. Requires platform API key auth."""
+    data = await request.json()
+    anthropic_key = data.get("anthropic_key", "").strip()
+    if not anthropic_key.startswith("sk-ant-"):
+        raise HTTPException(status_code=400, detail="Invalid Anthropic key format — must start with sk-ant-")
+    save_user_anthropic_key(api_key, anthropic_key)
+    return {"status": "saved"}
+
+
+# ─── TELEGRAM ACCOUNT LINKING ────────────────────────────────
+
+@app.post("/api/v1/telegram/generate-connect-token")
+async def generate_telegram_connect_token(api_key: str = Depends(get_api_key)):
+    """Generate a short-lived 6-char token for linking a Telegram chat to this account."""
+    # Verify user exists
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id FROM users WHERE api_key = ?", (api_key,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    token = _generate_connect_token(api_key)
+    bot = os.getenv("TELEGRAM_BOT_USERNAME", "ClawdClauBot")
+    return {
+        "token": token,
+        "expires_in": _TOKEN_TTL,
+        "instructions": f"Send this to @{bot} on Telegram:\n/connect {token}",
+        "bot_url": f"https://t.me/{bot}",
+    }
+
+
+@app.post("/api/v1/telegram/connect")
+async def telegram_connect(request: Request):
+    """Link a Telegram chat_id to a user account via a connect token.
+    No API key required — the token already encodes the user identity."""
+    data = await request.json()
+    token = data.get("token", "").strip().upper()
+    chat_id = str(data.get("chat_id", "")).strip()
+    if not token or not chat_id:
+        raise HTTPException(status_code=400, detail="token and chat_id required")
+    api_key = _consume_connect_token(token)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Invalid or expired token. Generate a new one at swarmsfall.com > Settings > Connect Telegram")
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE users SET telegram_chat_id = ? WHERE api_key = ?",
+            (chat_id, api_key),
+        )
+        conn.commit()
+        logger.info(f"Telegram chat_id {chat_id} linked to user {api_key[:8]}")
+    except Exception as e:
+        logger.error(f"Telegram connect failed: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        conn.close()
+    return {"status": "linked", "message": "Your Telegram is now connected to swarmsfall.com"}
+
+
+@app.get("/api/v1/telegram/status")
+async def telegram_status(api_key: str = Depends(get_api_key)):
+    """Check if this user's Telegram is connected."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT telegram_chat_id FROM users WHERE api_key = ?", (api_key,)
+        ).fetchone()
+    finally:
+        conn.close()
+    connected = bool(row and row[0])
+    return {"connected": connected, "chat_id": row[0] if connected else None}
 
 
 @app.get("/api/v1/daemons/presets")
@@ -7831,7 +7948,61 @@ async function pSettings() {
       <div class="card"><div class="card-head"><div class="card-title">Channels</div></div><div class="card-body">${Object.entries(m||{}).map(([n,i])=>`<div class="agent-row"><div class="dot ${i.enabled?'live':'idle'}"></div><div class="agent-name" style="text-transform:capitalize">${n}</div><span class="agent-badge ${i.enabled?'badge-done':'badge-err'}">${i.enabled?'Connected':'Off'}</span></div>`).join('')}</div></div>
     </div>
     <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Platform API Key</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your APEX SWARM platform key (auto-assigned at signup)</div><input class="input" id="sKey" value="${KEY}" style="font-family:'IBM Plex Mono',monospace;font-size:12px" readonly></div></div>
-      <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Anthropic API Key (BYOK)</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your personal Anthropic key — agents use this to run. Never shared. <a href="https://console.anthropic.com" target="_blank" style="color:var(--mint)">Get one →</a></div><input class="input" id="sAnthropicKey" value="${localStorage.getItem('apex_anthropic_key')||''}" placeholder="sk-ant-..." style="font-family:'IBM Plex Mono',monospace;font-size:12px"><button class="btn btn-mint btn-sm" style="margin-top:10px" onclick="localStorage.setItem('apex_anthropic_key',$('#sAnthropicKey').value);alert('Anthropic key saved locally.')">Save Key</button></div></div></div>`;
+      <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Connect Telegram</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:12px">Link your Telegram to use <b style="color:var(--text1)">/setkey</b> and BYOK agents from @${h.channels?.telegram?'ClawdClauBot':'—'}.</div><div id="tgStatus" style="margin-bottom:10px;font-size:12px;color:var(--text3)">Checking...</div><button class="btn btn-mint btn-sm" onclick="genTgToken()">Generate Connect Code</button><div id="tgTokenBox" style="display:none;margin-top:12px"><div style="font-size:11px;color:var(--text3);margin-bottom:6px">Send this to @ClawdClauBot on Telegram:</div><div id="tgTokenVal" style="font-family:'IBM Plex Mono',monospace;font-size:20px;letter-spacing:4px;color:var(--mint);padding:10px 0"></div><div style="font-size:11px;color:var(--text3)">Expires in 10 min · Single use</div><button class="btn btn-sm" style="margin-top:8px" onclick="copyTgToken()">Copy /connect command</button></div></div></div>
+      <div class="card" style="margin-top:14px"><div class="card-head"><div class="card-title">Anthropic API Key (BYOK)</div></div><div class="card-body"><div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your personal Anthropic key — agents use your credits. Never shared. <a href="https://console.anthropic.com" target="_blank" style="color:var(--mint)">Get one →</a></div><div id="byokStatus" style="font-size:12px;color:var(--text3);margin-bottom:8px">Checking...</div><input class="input" id="sAnthropicKey" placeholder="sk-ant-..." style="font-family:'IBM Plex Mono',monospace;font-size:12px"><button class="btn btn-mint btn-sm" style="margin-top:10px" onclick="saveBYOK()">Save Key</button></div></div></div>`;
+  // Load statuses after DOM is ready
+  Promise.all([
+    api('/api/v1/telegram/status').then(d=>{
+      const el=$('#tgStatus');
+      if(el) el.innerHTML = d.connected
+        ? '<span style="color:var(--mint)">Connected</span>'
+        : '<span style="color:var(--rose)">Not connected</span>';
+    }).catch(()=>{}),
+    api('/api/v1/byok/status').then(d=>{
+      const el=$('#byokStatus');
+      if(el) el.textContent = d.byok_active ? 'BYOK key: active' : 'No BYOK key saved';
+    }).catch(()=>{})
+  ]);
+}
+
+let _tgToken = '';
+async function genTgToken() {
+  const d = await api('/api/v1/telegram/generate-connect-token', {method:'POST',body:'{}'});
+  if(d.token) {
+    _tgToken = d.token;
+    const box = $('#tgTokenBox');
+    if(box) box.style.display='block';
+    const val = $('#tgTokenVal');
+    if(val) val.textContent = d.token;
+    const st = $('#tgStatus');
+    if(st) st.innerHTML='<span style="color:var(--mint)">Code generated — expires in 10 min</span>';
+  } else {
+    alert(d.detail || d.error || 'Failed to generate token');
+  }
+}
+
+function copyTgToken() {
+  const text = '/connect ' + _tgToken;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent='Copied!';
+    setTimeout(()=>btn.textContent=orig, 1500);
+  });
+}
+
+async function saveBYOK() {
+  const key = ($('#sAnthropicKey')||{}).value || '';
+  if(!key.startsWith('sk-ant-')) { alert('Key must start with sk-ant-'); return; }
+  const d = await api('/api/v1/byok/set-key', {method:'POST', body: JSON.stringify({anthropic_key: key})});
+  if(d.status === 'saved') {
+    const el = $('#byokStatus');
+    if(el) el.innerHTML='<span style="color:var(--mint)">BYOK key saved!</span>';
+    const inp = $('#sAnthropicKey');
+    if(inp) inp.value='';
+  } else {
+    alert(d.detail || d.error || 'Save failed');
+  }
 }
 
 // ─── SSE ──────────────────────────

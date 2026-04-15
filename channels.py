@@ -545,12 +545,51 @@ class CommandRouter:
                 await send_to_channel(msg, "Slash skills not available.")
             return
 
+        # ─── CONNECT (link Telegram to swarmsfall.com account) ─────
+        if command in ("connect", "link"):
+            token = args.strip().upper()
+            base = os.getenv("BASE_URL", "https://swarmsfall.com")
+            if not token:
+                bot = os.getenv("TELEGRAM_BOT_USERNAME", "ClawdClauBot")
+                await send_to_channel(msg,
+                    "Link your Telegram to swarmsfall.com:\n\n"
+                    "1. Go to swarmsfall.com/dashboard\n"
+                    "2. Open Settings > Connect Telegram\n"
+                    "3. Copy the 6-char code\n"
+                    "4. Send: /connect YOURCODE\n\n"
+                    "Once linked, use /setkey sk-ant-... to activate BYOK."
+                )
+                return
+            chat_id = msg.channel_id
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    r = await client.post(
+                        f"{base}/api/v1/telegram/connect",
+                        json={"token": token, "chat_id": str(chat_id)},
+                    )
+                if r.status_code == 200:
+                    await send_to_channel(msg,
+                        "Telegram linked to your swarmsfall.com account!\n\n"
+                        "Now activate BYOK with:\n/setkey sk-ant-YOUR_ANTHROPIC_KEY\n\n"
+                        "Get a free key at console.anthropic.com"
+                    )
+                else:
+                    detail = ""
+                    try:
+                        detail = r.json().get("detail", r.text[:120])
+                    except Exception:
+                        detail = r.text[:120]
+                    await send_to_channel(msg, f"Could not link account: {detail}")
+            except Exception as e:
+                await send_to_channel(msg, f"Error: {str(e)[:100]}")
+            return
+
         # ─── SETKEY ─────
         if command in ("setkey", "set-key", "set_key"):
             key = args.strip()
             if not key.startswith("sk-ant-"):
                 await send_to_channel(msg,
-                    "To set your Anthropic key:\n/setkey sk-ant-YOUR_KEY\n\nGet a free key at console.anthropic.com")
+                    "To set your Anthropic key:\n/setkey sk-ant-YOUR_KEY\n\nGet a free key at console.anthropic.com\n\nFirst-time? Link your account with /connect")
                 return
             chat_id = msg.channel_id
             base = os.getenv("BASE_URL", "https://swarmsfall.com")
@@ -563,6 +602,10 @@ class CommandRouter:
                 if r.status_code == 200:
                     await send_to_channel(msg,
                         "Anthropic key saved! Your agents now use your own credits.\nTry: /research what is bitcoin")
+                elif r.status_code == 404:
+                    await send_to_channel(msg,
+                        "Account not linked yet. First run:\n/connect YOURCODE\n\n"
+                        "Get your code at swarmsfall.com/dashboard > Settings > Connect Telegram")
                 else:
                     await send_to_channel(msg, f"Failed to save key: {r.text[:100]}")
             except Exception as e:
