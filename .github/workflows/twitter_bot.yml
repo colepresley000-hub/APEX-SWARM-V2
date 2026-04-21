@@ -1,0 +1,37 @@
+name: Apex Swarm Twitter Bot
+
+on:
+  schedule:
+    # 5x per day — 9am, 12pm, 3pm, 6pm, 9pm Lagos (UTC+1)
+    - cron: '0 8 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 14 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 20 * * *'
+  workflow_dispatch: # allows manual trigger from GitHub UI
+
+jobs:
+  post-tweet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install tweepy anthropic python-dotenv
+
+      - name: Post tweet
+        env:
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TWITTER_DRAFT_MODE: 'false'
+        run: python3 twitter_bot.py autopost
