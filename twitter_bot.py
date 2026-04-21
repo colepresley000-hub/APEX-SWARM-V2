@@ -135,7 +135,21 @@ for cat in TWEET_CATEGORIES:
 
 
 # ── Claude content generation ─────────────────────────────────────────────────
-def generate_tweet(category: dict) -> str:
+def get_recent_tweets(n: int = 8) -> list[str]:
+    """Fetch last n tweet texts from the account to avoid duplicate content."""
+    try:
+        client = get_twitter_client()
+        result = client.get_users_tweets(
+            id="66307166", max_results=n, tweet_fields=["text"]
+        )
+        if result.data:
+            return [t.text for t in result.data]
+    except Exception as e:
+        log.warning(f"Could not fetch recent tweets: {e}")
+    return []
+
+
+def generate_tweet(category: dict, recent_tweets: list[str] | None = None) -> str:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     system = (
@@ -146,6 +160,14 @@ def generate_tweet(category: dict) -> str:
         "Return ONLY the tweet text — no quotes, no explanation, no commentary."
     )
 
+    avoid_block = ""
+    if recent_tweets:
+        avoid_block = (
+            "\n\nDO NOT repeat or closely paraphrase any of these recently posted tweets:\n"
+            + "\n".join(f"- {t}" for t in recent_tweets[:8])
+            + "\n\nWrite something completely different in structure and wording."
+        )
+
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
@@ -154,7 +176,8 @@ def generate_tweet(category: dict) -> str:
                 "role": "user",
                 "content": (
                     f"{category['brief']}\n\n"
-                    f"Today's date context: {datetime.now().strftime('%B %Y')}.\n"
+                    f"Today's date context: {datetime.now().strftime('%B %Y')}."
+                    f"{avoid_block}\n"
                     f"Return only the tweet, under 280 characters."
                 ),
             }
@@ -226,6 +249,9 @@ def post_tweet(tweet: str, category_name: str) -> dict | None:
         append_posted_log(entry)
         log.info(f"Posted [{category_name}] id={tweet_id}: {tweet}")
         return entry
+    except tweepy.errors.Forbidden as e:
+        log.error(f"Tweet forbidden (duplicate/spam detected): {e}")
+        return None
     except tweepy.TweepyException as e:
         log.error(f"Tweet failed: {e}")
         return None
@@ -306,17 +332,32 @@ def cmd_post_now(category_name: str | None = None):
 
 
 def cmd_autopost(category_name: str | None = None):
-    """Non-interactive post — used by remote/scheduled agents."""
-    if category_name:
-        cats = [c for c in TWEET_CATEGORIES if c["name"] == category_name]
-        category = cats[0] if cats else random.choice(TWEET_POOL)
-    else:
-        category = random.choice(TWEET_POOL)
+    """Non-interactive post — used by remote/scheduled agents. Retries on 403."""
+    recent = get_recent_tweets(8)
+    used_categories = set()
 
-    tweet = generate_tweet(category)
-    result = post_tweet(tweet, category["name"])
-    print(f"[autopost] {category['name']}: {tweet}")
-    return result
+    for attempt in range(3):
+        if category_name and attempt == 0:
+            cats = [c for c in TWEET_CATEGORIES if c["name"] == category_name]
+            category = cats[0] if cats else random.choice(TWEET_POOL)
+        else:
+            # Pick a category not already tried
+            available = [c for c in TWEET_POOL if c["name"] not in used_categories]
+            category = random.choice(available if available else TWEET_POOL)
+
+        used_categories.add(category["name"])
+        tweet = generate_tweet(category, recent_tweets=recent)
+        log.info(f"Attempt {attempt+1}/3 [{category['name']}]: {tweet}")
+
+        result = post_tweet(tweet, category["name"])
+        if result:
+            print(f"[autopost] {category['name']}: {tweet}")
+            return result
+
+        log.warning(f"Attempt {attempt+1} failed, retrying with different category/content...")
+
+    log.error("All 3 autopost attempts failed.")
+    return None
 
 
 def cmd_preview(n: int = 5):
