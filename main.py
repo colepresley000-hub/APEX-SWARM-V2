@@ -5943,6 +5943,291 @@ async def dashboard():
     return HTMLResponse(DASHBOARD_HTML.replace("__VERSION__", VERSION))
 
 
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return HTMLResponse(TERMS_HTML)
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return HTMLResponse(PRIVACY_HTML)
+
+
+TERMS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms of Service — Apex Swarm</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#04040a;--bg2:#080810;--bg3:#0e0e1a;--mint:#00ffaa;--mint2:#00cc88;--text:#f0f0f8;--text2:#7878a0;--text3:#2e2e4a;--border:rgba(255,255,255,0.07)}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;line-height:1.8;min-height:100vh}
+nav{display:flex;align-items:center;justify-content:space-between;padding:24px 64px;border-bottom:1px solid var(--border);background:var(--bg)}
+.nav-logo{font-family:'IBM Plex Mono',monospace;font-size:16px;letter-spacing:4px;color:var(--mint);text-decoration:none;font-weight:700;text-transform:uppercase}
+.nav-links{display:flex;gap:24px}
+.nav-links a{color:var(--text2);text-decoration:none;font-size:13px;transition:color .2s}
+.nav-links a:hover{color:var(--mint)}
+.container{max-width:800px;margin:0 auto;padding:64px 32px}
+.page-label{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--mint);text-transform:uppercase;margin-bottom:16px}
+h1{font-size:40px;font-weight:600;margin-bottom:8px;letter-spacing:-0.5px}
+.last-updated{font-size:13px;color:var(--text2);margin-bottom:56px;font-family:'IBM Plex Mono',monospace}
+h2{font-size:18px;font-weight:600;color:var(--mint);margin:40px 0 14px;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+p{color:var(--text2);margin-bottom:16px;font-size:15px}
+ul,ol{color:var(--text2);padding-left:24px;margin-bottom:16px;font-size:15px}
+li{margin-bottom:8px}
+a{color:var(--mint);text-decoration:none}
+a:hover{color:var(--mint2);text-decoration:underline}
+.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
+footer{text-align:center;padding:40px 32px;border-top:1px solid var(--border);color:var(--text2);font-size:13px;font-family:'IBM Plex Mono',monospace}
+footer a{color:var(--mint);text-decoration:none}
+@media(max-width:768px){nav{padding:20px 24px}.container{padding:48px 24px}h1{font-size:30px}}
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-logo" href="/">APEX SWARM</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/privacy">Privacy</a>
+  </div>
+</nav>
+<div class="container">
+  <div class="page-label">Legal</div>
+  <h1>Terms of Service</h1>
+  <div class="last-updated">Last updated: April 16, 2026</div>
+
+  <p>Welcome to Apex Swarm. By accessing or using our platform at <a href="https://swarmsfall.com">swarmsfall.com</a> (the "Service"), you agree to be bound by these Terms of Service ("Terms"). Please read them carefully before using the Service. If you do not agree to these Terms, do not access or use the Service.</p>
+
+  <h2>1. Use of Service</h2>
+  <p>Apex Swarm provides an AI-powered automation platform that enables users to deploy and manage autonomous AI agents for business workflows, marketing automation, lead generation, and related tasks. You may use the Service only for lawful purposes and in accordance with these Terms.</p>
+  <p>To access most features of the Service, you must create an account and provide accurate, complete, and current information. You are responsible for maintaining the confidentiality of your credentials and for all activity that occurs under your account.</p>
+
+  <h2>2. Acceptable Use</h2>
+  <p>You agree not to use the Service to:</p>
+  <ul>
+    <li>Violate any applicable local, state, national, or international law or regulation</li>
+    <li>Send unsolicited communications (spam) or engage in deceptive advertising practices</li>
+    <li>Violate the terms of service of any third-party platform integrated with Apex Swarm, including but not limited to TikTok, Meta, LinkedIn, and Google</li>
+    <li>Scrape, harvest, or collect data from third-party services in violation of their terms</li>
+    <li>Transmit malware, viruses, or any other malicious or harmful code</li>
+    <li>Attempt to gain unauthorized access to the Service, other accounts, or any related systems</li>
+    <li>Engage in any activity that interferes with or disrupts the integrity or performance of the Service</li>
+    <li>Use the Service to generate, distribute, or promote content that is illegal, harmful, threatening, abusive, defamatory, or otherwise objectionable</li>
+    <li>Reverse engineer, decompile, or disassemble any portion of the Service</li>
+    <li>Resell, sublicense, or otherwise commercialize access to the Service without our express written consent</li>
+  </ul>
+  <p>Apex Swarm reserves the right to suspend or terminate accounts that violate these acceptable use policies at our sole discretion, without prior notice.</p>
+
+  <h2>3. Payment Terms</h2>
+  <p>Certain features of the Service are available on a paid subscription basis. By subscribing to a paid plan, you agree to pay all applicable fees as described on our pricing page.</p>
+  <ul>
+    <li><strong>Billing:</strong> Subscriptions are billed on a recurring monthly or annual basis, beginning on the date you subscribe. Fees are charged in advance at the start of each billing period.</li>
+    <li><strong>Payment Methods:</strong> We accept payment via credit card and other methods made available through our payment processor. You authorize us to charge your payment method on a recurring basis.</li>
+    <li><strong>Price Changes:</strong> We reserve the right to modify pricing at any time. We will provide at least 30 days' notice before any price change takes effect. Continued use of the Service after a price change constitutes acceptance of the new pricing.</li>
+    <li><strong>Refunds:</strong> All fees are non-refundable except as required by law or as expressly stated in a separate agreement. If you cancel your subscription, you will retain access to paid features through the end of your current billing period.</li>
+    <li><strong>Taxes:</strong> Prices listed do not include applicable taxes. You are responsible for any taxes arising from your use of the Service.</li>
+    <li><strong>Failed Payments:</strong> If a payment fails, we may suspend your access to paid features until the outstanding balance is resolved. We will attempt to notify you via email before suspending service.</li>
+  </ul>
+
+  <h2>4. Intellectual Property</h2>
+  <p>The Service, including all software, designs, text, graphics, logos, and other content ("Apex Swarm Content"), is owned by or licensed to Apex Swarm and is protected by applicable intellectual property laws. You may not copy, modify, distribute, sell, or create derivative works of any Apex Swarm Content without our express written permission.</p>
+  <p>You retain ownership of all data, content, and materials you submit or create through the Service ("User Content"). By submitting User Content to the Service, you grant Apex Swarm a worldwide, non-exclusive, royalty-free license to use, process, store, and display your User Content solely as necessary to provide and improve the Service.</p>
+  <p>You represent and warrant that you have all rights necessary to grant this license and that your User Content does not infringe the intellectual property or other rights of any third party.</p>
+
+  <h2>5. Third-Party Integrations</h2>
+  <p>The Service may integrate with or facilitate access to third-party platforms and services (e.g., TikTok, Meta, Google Ads, LinkedIn). Your use of these integrations is governed by the respective terms of service and privacy policies of those third parties. Apex Swarm is not responsible for the practices or policies of third-party platforms, and we make no warranties regarding their availability, accuracy, or performance.</p>
+  <p>You are solely responsible for ensuring that your use of third-party integrations through the Service complies with all applicable third-party terms and policies.</p>
+
+  <h2>6. Disclaimers</h2>
+  <p>THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. APEX SWARM DOES NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR FREE FROM HARMFUL COMPONENTS.</p>
+  <p>AI-generated outputs produced by the Service are not guaranteed to be accurate, complete, or suitable for any particular purpose. You are solely responsible for reviewing, validating, and taking responsibility for any actions taken based on AI-generated content.</p>
+
+  <h2>7. Limitation of Liability</h2>
+  <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, APEX SWARM AND ITS OFFICERS, DIRECTORS, EMPLOYEES, AND AGENTS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, BUSINESS, OR GOODWILL, ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF OR INABILITY TO USE THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
+  <p>OUR TOTAL CUMULATIVE LIABILITY TO YOU FOR ANY CLAIMS ARISING OUT OF OR RELATING TO THESE TERMS OR YOUR USE OF THE SERVICE SHALL NOT EXCEED THE GREATER OF (A) THE TOTAL FEES PAID BY YOU TO APEX SWARM IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM OR (B) ONE HUNDRED DOLLARS ($100).</p>
+  <p>Some jurisdictions do not allow the exclusion or limitation of certain warranties or liability, so the above limitations may not apply to you.</p>
+
+  <h2>8. Indemnification</h2>
+  <p>You agree to indemnify, defend, and hold harmless Apex Swarm and its officers, directors, employees, agents, and licensors from and against any claims, liabilities, damages, losses, and expenses (including reasonable attorneys' fees) arising out of or in any way connected with your access to or use of the Service, your User Content, or your violation of these Terms.</p>
+
+  <h2>9. Termination</h2>
+  <p>We reserve the right to suspend or terminate your access to the Service at any time, with or without cause, with or without notice, effective immediately. Grounds for termination include but are not limited to violation of these Terms, fraudulent or illegal activity, or non-payment of fees.</p>
+  <p>You may cancel your account at any time by contacting us at <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a> or through your account settings. Upon termination, your right to use the Service will immediately cease.</p>
+  <p>Sections of these Terms that by their nature should survive termination shall survive, including but not limited to Intellectual Property, Disclaimers, Limitation of Liability, and Indemnification.</p>
+
+  <h2>10. Governing Law</h2>
+  <p>These Terms shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of law provisions. Any disputes arising under these Terms shall be subject to the exclusive jurisdiction of the courts located in Delaware.</p>
+
+  <h2>11. Changes to Terms</h2>
+  <p>We may update these Terms from time to time. We will notify you of material changes by posting the updated Terms on this page with a revised "Last updated" date and, where appropriate, by emailing you at the address associated with your account. Your continued use of the Service after the effective date of any changes constitutes your acceptance of the revised Terms.</p>
+
+  <h2>12. Contact</h2>
+  <p>If you have any questions about these Terms of Service, please contact us at:</p>
+  <p><strong>Apex Swarm</strong><br>
+  Email: <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a><br>
+  Website: <a href="https://swarmsfall.com">swarmsfall.com</a></p>
+
+  <hr class="divider">
+</div>
+<footer>
+  &copy; 2026 Apex Swarm &nbsp;|&nbsp; <a href="/terms">Terms</a> &nbsp;|&nbsp; <a href="/privacy">Privacy</a> &nbsp;|&nbsp; <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a>
+</footer>
+</body>
+</html>"""
+
+
+PRIVACY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — Apex Swarm</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#04040a;--bg2:#080810;--bg3:#0e0e1a;--mint:#00ffaa;--mint2:#00cc88;--text:#f0f0f8;--text2:#7878a0;--text3:#2e2e4a;--border:rgba(255,255,255,0.07)}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;line-height:1.8;min-height:100vh}
+nav{display:flex;align-items:center;justify-content:space-between;padding:24px 64px;border-bottom:1px solid var(--border);background:var(--bg)}
+.nav-logo{font-family:'IBM Plex Mono',monospace;font-size:16px;letter-spacing:4px;color:var(--mint);text-decoration:none;font-weight:700;text-transform:uppercase}
+.nav-links{display:flex;gap:24px}
+.nav-links a{color:var(--text2);text-decoration:none;font-size:13px;transition:color .2s}
+.nav-links a:hover{color:var(--mint)}
+.container{max-width:800px;margin:0 auto;padding:64px 32px}
+.page-label{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:var(--mint);text-transform:uppercase;margin-bottom:16px}
+h1{font-size:40px;font-weight:600;margin-bottom:8px;letter-spacing:-0.5px}
+.last-updated{font-size:13px;color:var(--text2);margin-bottom:56px;font-family:'IBM Plex Mono',monospace}
+h2{font-size:18px;font-weight:600;color:var(--mint);margin:40px 0 14px;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;text-transform:uppercase}
+p{color:var(--text2);margin-bottom:16px;font-size:15px}
+ul,ol{color:var(--text2);padding-left:24px;margin-bottom:16px;font-size:15px}
+li{margin-bottom:8px}
+a{color:var(--mint);text-decoration:none}
+a:hover{color:var(--mint2);text-decoration:underline}
+.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
+footer{text-align:center;padding:40px 32px;border-top:1px solid var(--border);color:var(--text2);font-size:13px;font-family:'IBM Plex Mono',monospace}
+footer a{color:var(--mint);text-decoration:none}
+@media(max-width:768px){nav{padding:20px 24px}.container{padding:48px 24px}h1{font-size:30px}}
+</style>
+</head>
+<body>
+<nav>
+  <a class="nav-logo" href="/">APEX SWARM</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/terms">Terms</a>
+  </div>
+</nav>
+<div class="container">
+  <div class="page-label">Legal</div>
+  <h1>Privacy Policy</h1>
+  <div class="last-updated">Last updated: April 16, 2026</div>
+
+  <p>Apex Swarm ("we," "our," or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our platform at <a href="https://swarmsfall.com">swarmsfall.com</a> (the "Service"). Please read this policy carefully. If you disagree with its terms, please discontinue use of the Service.</p>
+
+  <h2>1. Information We Collect</h2>
+  <p>We collect information in the following ways:</p>
+  <p><strong>Information You Provide Directly:</strong></p>
+  <ul>
+    <li>Account registration data: name, email address, password (stored as a cryptographic hash)</li>
+    <li>Billing information: payment card details (processed and stored by our payment processor; we do not store raw card data)</li>
+    <li>API keys and credentials for third-party platforms you connect (e.g., TikTok, Meta, Google)</li>
+    <li>Content and data you input into the Service, including agent configurations, workflow definitions, and campaign content</li>
+    <li>Communications you send to us, including support requests and feedback</li>
+  </ul>
+  <p><strong>Information Collected Automatically:</strong></p>
+  <ul>
+    <li>Log data: IP address, browser type, pages visited, timestamps, referring URLs</li>
+    <li>Device information: operating system, browser version, screen resolution</li>
+    <li>Usage data: features used, agent runs, API calls made, and task execution history</li>
+    <li>Cookies and similar tracking technologies (see Section 6 below)</li>
+  </ul>
+  <p><strong>Information from Third Parties:</strong></p>
+  <ul>
+    <li>If you connect third-party accounts (Google, TikTok, Meta, etc.), we receive data necessary to authenticate and operate those integrations, subject to the permissions you grant</li>
+    <li>Payment processors may share transaction confirmation and billing status information with us</li>
+  </ul>
+
+  <h2>2. How We Use Your Information</h2>
+  <p>We use the information we collect to:</p>
+  <ul>
+    <li>Provide, operate, maintain, and improve the Service</li>
+    <li>Process transactions and manage your subscription</li>
+    <li>Authenticate your identity and secure your account</li>
+    <li>Execute AI agent tasks and automation workflows on your behalf</li>
+    <li>Send transactional communications, such as account confirmations, billing receipts, and security alerts</li>
+    <li>Send product updates, newsletters, and marketing communications (you may opt out at any time)</li>
+    <li>Respond to customer support requests and inquiries</li>
+    <li>Monitor and analyze usage patterns to improve product features and user experience</li>
+    <li>Detect, investigate, and prevent fraudulent transactions, abuse, and security incidents</li>
+    <li>Comply with legal obligations and enforce our Terms of Service</li>
+  </ul>
+
+  <h2>3. Third-Party Sharing</h2>
+  <p>We do not sell your personal information. We may share your information with third parties only in the following circumstances:</p>
+  <ul>
+    <li><strong>Service Providers:</strong> We share data with trusted vendors who assist us in operating the Service, including cloud infrastructure providers (e.g., Railway), payment processors (e.g., Stripe), email delivery services, and analytics providers. These vendors are contractually obligated to use your data only to perform services on our behalf.</li>
+    <li><strong>Platform Integrations:</strong> When you connect third-party advertising or social media platforms (such as TikTok Ads, Meta/Facebook Ads, Google Ads, or LinkedIn), we transmit the data necessary to execute your authorized workflows on those platforms. Your use of these integrations is also governed by the respective platform's privacy policy.</li>
+    <li><strong>Business Transfers:</strong> If Apex Swarm is involved in a merger, acquisition, financing, or sale of assets, your information may be transferred as part of that transaction. We will provide notice before your information becomes subject to a different privacy policy.</li>
+    <li><strong>Legal Requirements:</strong> We may disclose your information if required to do so by law or in response to valid requests by public authorities (e.g., a court or government agency), or if we believe disclosure is necessary to protect the rights, property, or safety of Apex Swarm, our users, or the public.</li>
+    <li><strong>With Your Consent:</strong> We may share your information for any other purpose with your explicit consent.</li>
+  </ul>
+
+  <h2>4. Data Retention</h2>
+  <p>We retain your personal information for as long as your account is active or as needed to provide the Service. Specifically:</p>
+  <ul>
+    <li>Account data is retained for the duration of your account, plus up to 90 days after account deletion to allow for recovery and to fulfill legal obligations</li>
+    <li>Billing records are retained for a minimum of 7 years as required by applicable tax and financial regulations</li>
+    <li>Agent execution logs and task history are retained for up to 12 months, after which they are automatically purged</li>
+    <li>API credentials for connected platforms are deleted promptly upon account disconnection or account deletion</li>
+  </ul>
+  <p>You may request earlier deletion of your data as described in Section 7 (Your Rights) below.</p>
+
+  <h2>5. Data Security</h2>
+  <p>We implement industry-standard technical and organizational measures to protect your information against unauthorized access, alteration, disclosure, or destruction. These measures include encryption in transit (TLS), encrypted storage of sensitive credentials, access controls, and regular security reviews.</p>
+  <p>However, no method of transmission over the Internet or electronic storage is 100% secure. While we strive to use commercially acceptable means to protect your information, we cannot guarantee absolute security.</p>
+
+  <h2>6. Cookies and Tracking</h2>
+  <p>We use cookies and similar technologies to maintain your session, remember your preferences, and analyze how the Service is used. You can instruct your browser to refuse all cookies or to indicate when a cookie is being sent. However, if you do not accept cookies, some features of the Service may not function properly.</p>
+  <p>We may also use third-party analytics tools (such as aggregated, anonymized analytics) to understand usage patterns and improve the Service.</p>
+
+  <h2>7. Your Rights</h2>
+  <p>Depending on your jurisdiction, you may have the following rights with respect to your personal information:</p>
+  <ul>
+    <li><strong>Access:</strong> Request a copy of the personal information we hold about you</li>
+    <li><strong>Correction:</strong> Request correction of inaccurate or incomplete personal information</li>
+    <li><strong>Deletion:</strong> Request deletion of your personal information, subject to certain legal exceptions</li>
+    <li><strong>Portability:</strong> Request a machine-readable export of your personal data</li>
+    <li><strong>Objection / Restriction:</strong> Object to or request restriction of certain processing activities</li>
+    <li><strong>Opt-out of marketing:</strong> Unsubscribe from marketing emails at any time using the unsubscribe link in those emails or by contacting us directly</li>
+  </ul>
+  <p>To exercise any of these rights, please contact us at <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a>. We will respond to your request within 30 days.</p>
+
+  <h2>8. Children's Privacy</h2>
+  <p>The Service is not directed to individuals under the age of 18. We do not knowingly collect personal information from children under 18. If we become aware that we have collected personal information from a child under 18, we will take steps to delete that information promptly. If you believe we may have collected such information, please contact us at <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a>.</p>
+
+  <h2>9. International Data Transfers</h2>
+  <p>Apex Swarm operates in the United States. If you are accessing the Service from outside the United States, please be aware that your information may be transferred to, stored, and processed in the United States, where data protection laws may differ from those in your jurisdiction. By using the Service, you consent to this transfer.</p>
+
+  <h2>10. Changes to This Policy</h2>
+  <p>We may update this Privacy Policy from time to time. We will notify you of significant changes by posting the new policy on this page with a revised "Last updated" date and, where appropriate, by emailing you. We encourage you to review this policy periodically to stay informed about how we are protecting your information.</p>
+
+  <h2>11. Contact Us</h2>
+  <p>If you have any questions, concerns, or requests regarding this Privacy Policy or our privacy practices, please contact us:</p>
+  <p><strong>Apex Swarm</strong><br>
+  Email: <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a><br>
+  Website: <a href="https://swarmsfall.com">swarmsfall.com</a></p>
+
+  <hr class="divider">
+</div>
+<footer>
+  &copy; 2026 Apex Swarm &nbsp;|&nbsp; <a href="/terms">Terms</a> &nbsp;|&nbsp; <a href="/privacy">Privacy</a> &nbsp;|&nbsp; <a href="mailto:support@swarmsfall.com">support@swarmsfall.com</a>
+</footer>
+</body>
+</html>"""
+
 
 LANDING_HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -7940,6 +8225,80 @@ go('overview');
 </body>
 </html>
 """
+
+
+# ─── TWITTER BOT ENDPOINT ─────────────────────────────────
+
+@app.post("/api/v1/twitter/autopost")
+async def twitter_autopost(x_api_key: str = Header(None)):
+    """Post one AI-generated tweet about Apex Swarm. Protected by ADMIN_API_KEY."""
+    if not ADMIN_API_KEY or x_api_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    import random, anthropic as _anthropic
+    import tweepy as _tweepy
+
+    tw_api_key     = os.getenv("TWITTER_API_KEY", "")
+    tw_api_secret  = os.getenv("TWITTER_API_SECRET", "")
+    tw_acc_token   = os.getenv("TWITTER_ACCESS_TOKEN", "")
+    tw_acc_secret  = os.getenv("TWITTER_ACCESS_SECRET", "")
+    tw_bearer      = os.getenv("TWITTER_BEARER_TOKEN", "")
+    ant_key        = os.getenv("ANTHROPIC_API_KEY", "")
+
+    if not all([tw_api_key, tw_api_secret, tw_acc_token, tw_acc_secret, ant_key]):
+        raise HTTPException(status_code=500, detail="Twitter/Anthropic credentials not configured")
+
+    angles = [
+        "FOMO/scarcity: limited early access, spots filling, early mover advantage for swarmsfall.com",
+        "Social proof: users running 85+ AI agents for real back-office work at swarmsfall.com",
+        "Pain point hook: relatable solo founder problem solved by Apex Swarm at swarmsfall.com",
+        "Feature spotlight: pick one feature (gig hunter, whale watcher, daemon agents, Telegram control) at swarmsfall.com",
+        "Founder contrarian take: replaced VA stack with AI agents at swarmsfall.com",
+        "Direct CTA: make someone click swarmsfall.com right now",
+    ]
+    angle = random.choice(angles)
+
+    # Get recent tweets to avoid duplicates
+    recent_texts = []
+    try:
+        tw_read = _tweepy.Client(bearer_token=tw_bearer)
+        recent = tw_read.get_users_tweets(id="66307166", max_results=8, tweet_fields=["text"])
+        if recent.data:
+            recent_texts = [t.text for t in recent.data]
+    except Exception:
+        pass
+
+    avoid = ""
+    if recent_texts:
+        avoid = "\n\nDO NOT repeat or paraphrase these recent tweets:\n" + "\n".join(f"- {t}" for t in recent_texts)
+
+    ant = _anthropic.Anthropic(api_key=ant_key)
+    msg = ant.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        system=(
+            "You are a sharp Twitter copywriter for Apex Swarm at swarmsfall.com. "
+            "Brand voice: direct, confident, slightly edgy. "
+            "Rules: under 280 chars, no filler words, max 2 hashtags, always include swarmsfall.com. "
+            "Return ONLY the tweet text."
+        ),
+        messages=[{"role": "user", "content": f"Write a tweet using this angle: {angle}{avoid}\n\nReturn only the tweet, under 280 characters."}],
+    )
+    tweet = msg.content[0].text.strip().strip('"').strip("'")
+    if len(tweet) > 280:
+        tweet = tweet[:277] + "..."
+
+    tw = _tweepy.Client(
+        bearer_token=tw_bearer,
+        consumer_key=tw_api_key,
+        consumer_secret=tw_api_secret,
+        access_token=tw_acc_token,
+        access_token_secret=tw_acc_secret,
+    )
+    response = tw.create_tweet(text=tweet)
+    tweet_id = response.data["id"]
+
+    return {"status": "posted", "tweet_id": tweet_id, "tweet": tweet}
 
 
 # ─── ENTRYPOINT ───────────────────────────────────────────
