@@ -2,3 +2,9 @@
 *.db
 *.db-shm
 *.db-wal
+.claude/
+__pycache__/
+*.log
+.fuse_hidden*
+twitter_posted.json
+twitter_drafts/
