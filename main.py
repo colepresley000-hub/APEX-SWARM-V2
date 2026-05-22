@@ -2891,6 +2891,47 @@ async def send_telegram(chat_id: int, text: str):
 
 # ─── APP LIFESPAN ─────────────────────────────────────────
 
+async def _telegram_polling_loop():
+    """Long-poll Telegram getUpdates — used when running locally without HTTPS webhook."""
+    offset = None
+    logger.info("🔄 Telegram polling loop started")
+    async with httpx.AsyncClient(timeout=35) as client:
+        while True:
+            try:
+                params = {"timeout": 30, "allowed_updates": ["message"]}
+                if offset:
+                    params["offset"] = offset
+                r = await client.get(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+                    params=params
+                )
+                data = r.json()
+                if not data.get("ok"):
+                    await asyncio.sleep(5)
+                    continue
+                for update in data.get("result", []):
+                    offset = update["update_id"] + 1
+                    message = update.get("message", {})
+                    if not message:
+                        continue
+                    text = message.get("text", "").strip()
+                    # Intercept hello/menu before command_router
+                    if text.lower() in ("hello", "hi", "hey", "help", "agents", "start", "what can you do", "menu"):
+                        asyncio.create_task(handle_telegram_message(message))
+                    elif CHANNELS_LOADED:
+                        fake_update = {"message": message}
+                        msg = parse_telegram_webhook(fake_update)
+                        if msg:
+                            asyncio.create_task(command_router.handle(msg))
+                    elif text:
+                        asyncio.create_task(handle_telegram_message(message))
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Telegram polling error: {e}")
+                await asyncio.sleep(5)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -2930,18 +2971,18 @@ async def lifespan(app: FastAPI):
         if channels_active:
             logger.info(f"💬 Channels active: {', '.join(channels_active)}")
 
-    # Register Telegram webhook on startup
+    # Start Telegram polling (replaces webhook for local/non-HTTPS deployments)
     if TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN:
         try:
-            base = os.getenv("BASE_URL", "https://swarmsfall.com")
             async with __import__("httpx").AsyncClient() as client:
-                r = await client.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook",
-                    json={"url": f"{base}/api/v1/telegram/webhook"}
+                await client.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook",
+                    json={"drop_pending_updates": True}
                 )
-                logger.info(f"✅ Telegram webhook registered: {r.json().get('description','')}")
+            logger.info("📡 Telegram webhook cleared — starting polling loop")
         except Exception as e:
-            logger.warning(f"⚠️ Telegram webhook setup failed: {e}")
+            logger.warning(f"⚠️ Telegram webhook clear failed: {e}")
+        asyncio.create_task(_telegram_polling_loop())
 
     # Seed Cole OS into SwarmMemory
     if COLE_OS_LOADED and SWARM_MEMORY and swarm_memory:
@@ -5722,6 +5763,13 @@ async def telegram_webhook(request: Request):
     voice = message.get("voice") or message.get("audio")
     if voice and VOICE_AVAILABLE and voice_pipeline:
         asyncio.create_task(_handle_telegram_voice(message, voice))
+        return {"ok": True}
+
+    # Always handle hello/menu commands directly regardless of CHANNELS_LOADED
+    if message.get("text") and message["text"].strip().lower() in (
+        "hello", "hi", "hey", "help", "agents", "start", "what can you do", "menu"
+    ):
+        asyncio.create_task(handle_telegram_message(message))
         return {"ok": True}
 
     if CHANNELS_LOADED:
