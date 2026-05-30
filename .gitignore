@@ -8,3 +8,6 @@ __pycache__/
 .fuse_hidden*
 twitter_posted.json
 twitter_drafts/
+twitter_rotation.json
+venv/
+*.save
