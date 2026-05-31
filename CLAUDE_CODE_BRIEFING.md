@@ -1,7 +1,7 @@
 # APEX SWARM — Claude Code Briefing
 > Context for future Claude Code sessions. Keep this current.
 
-Last updated: 2026-04-15
+Last updated: 2026-05-31
 
 ---
 
@@ -9,7 +9,7 @@ Last updated: 2026-04-15
 - **URL**: https://swarmsfall.com
 - **Hosting**: Railway (auto-deploy from git push)
 - **DB**: PostgreSQL (Railway managed), SQLite fallback for local dev
-- **Backend**: Python FastAPI (`main.py` — ~8400 lines)
+- **Backend**: Python FastAPI (`main.py` — ~7900 lines, being decomposed into modules; see Module Structure below)
 - **Auth**: Gumroad license validation
 - **Bot**: @ClawdClauBot on Telegram
 
@@ -18,12 +18,68 @@ Last updated: 2026-04-15
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `main.py` | Everything — FastAPI app, all endpoints, agents, DB init |
+| `main.py` | FastAPI app, lifespan, `init_db()`, `execute_task()`, most endpoints + inline HTML |
+| `config.py` | All env-derived constants (single source of truth) |
+| `db.py` | DB connection layer (PgConnectionWrapper, get_db, db_execute/fetchone/fetchall) |
+| `auth.py` | Password hashing, token verify, org-member lookup, audit log |
+| `byok.py` | BYOK key save/resolve (get_user_anthropic_key) |
+| `telegram.py` | send_telegram + connect-token helpers |
+| `slack.py` | Slack outbound helpers |
+| `deps.py` | Shared FastAPI dependencies (get_api_key) |
+| `routes/` | APIRouter modules: `telegram.py`, `byok.py` (more to come) |
 | `channels.py` | Unified Telegram/Discord/Slack command router |
 | `slash_skills.py` | 10 specialist skill modes |
 | `gig_hunter.py` | Upwork RSS scraper + Firecrawl + proposal writer |
 | `monte_carlo.py` | Polymarket/prediction market simulation engine |
 | `cole_persona.py` | Brand voice for content agents (Cole OS) |
+
+---
+
+## Module Structure (decomposition in progress)
+
+main.py is being split into modules behind a route-snapshot safety net
+(`tests/smoke_test.py` — run it after every change; must stay at 161 routes).
+
+**Import layering (no cycles):**
+```
+config.py            (leaf, no deps)
+  └─ db.py           (config)
+       ├─ auth.py    (config, db)
+       ├─ byok.py    (config, db)
+       ├─ telegram.py(config, db)
+       └─ slack.py   (config, db)
+  deps.py            (fastapi only)
+routes/*.py          (config, db, deps, + the leaf modules — NEVER main)
+main.py              (imports everything; includes routers via app.include_router)
+```
+
+**Rule:** route modules under `routes/` must never import `main` (main imports
+them to register — that would be circular). Shared dependencies go in `deps.py`;
+shared logic goes in a leaf module.
+
+**Deferred (entangled with runtime module state — do NOT extract piecemeal):**
+- `init_db()` — mutates ~11 module globals via `global` (daemon_manager,
+  identity_manager, swarm_memory, etc.). Moving it rebinds those to the wrong
+  namespace. Needs a shared-state module first.
+- `execute_task()` — ~970 lines, core agent loop.
+- Daemon routes — read daemon_manager/identity_manager (set by init_db) and
+  `_daemon_execute_fn` (closes over execute_task).
+
+---
+
+## Known cleanup findings (from refactor audit, 2026-05-31)
+
+Duplicate route definitions where Starlette matches the FIRST registration, so
+the second is dead code. These were NOT auto-fixed because they differ in
+behavior (a fix is a product/security decision, not a refactor):
+- **`POST /api/v1/slack/test`** — the LIVE handler (main.py ~3083) has **no
+  auth**; an authenticated duplicate exists but is shadowed/dead (~5447).
+  Minor abuse vector (unauth'd caller can ping the default Slack webhook).
+  Fix = delete the unauth'd one so the auth'd version wins.
+- **`GET /api/v1/usage`** — two different implementations (`days=30` vs
+  `period=month`); first wins, second dead. Pick the intended one.
+- **`POST /api/v1/slack/configure`** — duplicated; both auth'd, near-identical.
+  Benign; second is dead.
 
 ---
 
