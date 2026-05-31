@@ -1492,81 +1492,15 @@ def get_user_anthropic_key(user_api_key: str) -> str:
 
 
 # ─── TELEGRAM CONNECT TOKENS ────────────────────────────────
-# Short-lived in-memory tokens for linking Telegram chat_id to a user account.
-# Format: {token_str: {"api_key": str, "expires_at": float}}
-
+# Connect-token helpers now live in telegram.py. `import random` retained here
+# because it's used elsewhere in this file (content angle picker).
 import random
-import string
 
-_TOKEN_TTL = 600  # 10 minutes
-
-
-def _ensure_connect_tokens_table():
-    """Create connect_tokens table if it doesn't exist (idempotent)."""
-    conn = get_db()
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS connect_tokens (
-                token TEXT PRIMARY KEY,
-                api_key TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
-        conn.commit()
-    except Exception as e:
-        logger.warning(f"connect_tokens table init: {e}")
-    finally:
-        conn.close()
-
-
-def _generate_connect_token(api_key: str) -> str:
-    """Create a fresh 6-char connect token, persisted to DB."""
-    _ensure_connect_tokens_table()
-    now_dt = datetime.now(timezone.utc)
-    now = now_dt.isoformat()
-    expires_at = (now_dt.replace(microsecond=0) + __import__('datetime').timedelta(seconds=_TOKEN_TTL)).isoformat()
-    token = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    conn = get_db()
-    try:
-        # Revoke existing tokens for this user and purge all expired
-        conn.execute("DELETE FROM connect_tokens WHERE api_key = ? OR expires_at < ?", (api_key, now))
-        conn.execute(
-            "INSERT INTO connect_tokens (token, api_key, expires_at, created_at) VALUES (?, ?, ?, ?)",
-            (token, api_key, expires_at, now),
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"_generate_connect_token DB error: {e}")
-    finally:
-        conn.close()
-    return token
-
-
-def _consume_connect_token(token: str) -> str | None:
-    """Verify and consume a connect token from DB. Returns api_key or None."""
-    _ensure_connect_tokens_table()
-    token = token.upper()
-    now = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT api_key, expires_at FROM connect_tokens WHERE token = ?", (token,)
-        ).fetchone()
-        if not row:
-            return None
-        if row[1] < now:
-            conn.execute("DELETE FROM connect_tokens WHERE token = ?", (token,))
-            conn.commit()
-            return None
-        conn.execute("DELETE FROM connect_tokens WHERE token = ?", (token,))
-        conn.commit()
-        return row[0]
-    except Exception as e:
-        logger.error(f"_consume_connect_token DB error: {e}")
-        return None
-    finally:
-        conn.close()
+from telegram import (
+    _TOKEN_TTL,
+    _generate_connect_token,
+    _consume_connect_token,
+)
 
 
 async def restore_daemons():
@@ -1738,65 +1672,18 @@ class UpdateOrgRequest(BaseModel):
 
 # ─── USER + ORG AUTH ─────────────────────────────────────
 
-import hashlib as _hl, hmac as _hm, base64 as _b64, json as _json
+# Auth & audit helpers live in auth.py. `_json` alias retained here because a
+# webhook handler further down still references it.
+import json as _json
 
-def hash_password(pw):
-    salt = os.urandom(16)
-    dk = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
-    return _b64.b64encode(salt + dk).decode()
-
-def verify_password(pw, stored):
-    try:
-        raw = _b64.b64decode(stored.encode())
-        salt, dk = raw[:16], raw[16:]
-        check = _hl.pbkdf2_hmac("sha256", pw.encode(), salt, 100000)
-        return _hm.compare_digest(dk, check)
-    except Exception:
-        return False
-
-def make_token(user_id):
-    p = _json.dumps({"u": user_id, "t": datetime.now(timezone.utc).isoformat()})
-    s = _hm.new(JWT_SECRET.encode(), p.encode(), _hl.sha256).hexdigest()
-    return _b64.urlsafe_b64encode((p + "|" + s).encode()).decode()
-
-def get_user_by_token(token):
-    try:
-        conn = get_db()
-        now = datetime.now(timezone.utc).isoformat()
-        row = db_fetchone(conn,
-            "SELECT s.user_id,u.email,u.tier,u.api_key,u.org_id,u.role FROM sessions s "
-            "JOIN users u ON s.user_id=u.id WHERE s.token=? AND s.expires_at>?",
-            (token, now))
-        conn.close()
-        if row:
-            return {"user_id":row[0],"email":row[1],"tier":row[2],"api_key":row[3],"org_id":row[4],"role":row[5]}
-        return None
-    except Exception:
-        return None
-
-def get_member_by_key(api_key):
-    conn = get_db()
-    try:
-        row = db_fetchone(conn,
-            "SELECT m.id,m.org_id,m.email,m.role,o.name,o.tier,o.slack_webhook,o.slack_channel "
-            "FROM org_members m JOIN orgs o ON m.org_id=o.id WHERE m.api_key=?",
-            (api_key,))
-        if row:
-            return {"member_id":row[0],"org_id":row[1],"email":row[2],"role":row[3],
-                    "org_name":row[4],"tier":row[5],"slack_webhook":row[6],"slack_channel":row[7]}
-        return None
-    finally:
-        conn.close()
-
-def log_audit(user_email, action, resource="", detail="", user_id="", org_id="", ip=""):
-    try:
-        conn = get_db()
-        db_execute(conn, "INSERT INTO audit_log (id,user_id,user_email,org_id,action,resource,detail,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                   (str(uuid.uuid4()),user_id,user_email,org_id,action,resource,str(detail)[:500],ip,datetime.now(timezone.utc).isoformat()))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error("Audit: " + str(e))
+from auth import (
+    hash_password,
+    verify_password,
+    make_token,
+    get_user_by_token,
+    get_member_by_key,
+    log_audit,
+)
 
 
 # ─── KNOWLEDGE RETRIEVAL ─────────────────────────────────
@@ -2799,22 +2686,9 @@ async def handle_telegram_message(message: dict):
     await send_telegram(chat_id, result)
 
 
-async def send_telegram(chat_id: int, text: str):
-    try:
-        # Try with Markdown first, fall back to plain text if it fails
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text[:4000], "parse_mode": "Markdown"},
-            )
-            if r.status_code == 400:
-                # Markdown parse error — retry as plain text
-                await client.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                    json={"chat_id": chat_id, "text": text[:4000]},
-                )
-    except Exception as e:
-        logger.error(f"Telegram send failed: {e}")
+# send_telegram lives in telegram.py (imported below near the other telegram
+# primitives). Inbound handling and the polling loop stay here.
+from telegram import send_telegram
 
 
 # ─── APP LIFESPAN ─────────────────────────────────────────
