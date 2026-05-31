@@ -1455,40 +1455,8 @@ def remove_daemon_config(daemon_id: str):
 
 # ─── BYOK: USER ANTHROPIC KEY ────────────────────────────────
 
-def save_user_anthropic_key(user_api_key: str, anthropic_key: str):
-    """Persist user's personal Anthropic key into the users table."""
-    conn = get_db()
-    try:
-        conn.execute(
-            "UPDATE users SET anthropic_key = ? WHERE api_key = ?",
-            (anthropic_key, user_api_key),
-        )
-        conn.commit()
-        logger.info(f"Saved anthropic_key for user {user_api_key[:8]}...")
-    except Exception as e:
-        logger.error(f"save_user_anthropic_key failed: {e}")
-    finally:
-        conn.close()
-
-
-def get_user_anthropic_key(user_api_key: str) -> str:
-    """Return user's personal Anthropic key, falling back to platform key."""
-    if not user_api_key or user_api_key.startswith(("daemon:", "telegram:", "discord:", "slack:")):
-        return ANTHROPIC_API_KEY
-    try:
-        conn = get_db()
-        try:
-            row = conn.execute(
-                "SELECT anthropic_key FROM users WHERE api_key = ?",
-                (user_api_key,),
-            ).fetchone()
-            if row and row[0] and row[0].startswith("sk-ant-"):
-                return row[0]
-        finally:
-            conn.close()
-    except Exception:
-        pass
-    return ANTHROPIC_API_KEY
+# BYOK key helpers live in byok.py (leaf module shared with routes/byok.py).
+from byok import save_user_anthropic_key, get_user_anthropic_key
 
 
 # ─── TELEGRAM CONNECT TOKENS ────────────────────────────────
@@ -2897,8 +2865,10 @@ app.add_middleware(
 # ─── MODULAR ROUTERS ───────────────────────────────────────
 # Route groups extracted from this file live under routes/ as APIRouters.
 from routes.telegram import router as telegram_router
+from routes.byok import router as byok_router
 
 app.include_router(telegram_router)
+app.include_router(byok_router)
 
 # ─── AUTH ENDPOINTS ────────────────────────────────────────
 
@@ -3565,57 +3535,6 @@ async def admin_suspend_user(user_id: str, current_user: dict = Depends(get_vali
         conn.execute("UPDATE users SET active=0 WHERE id=?", (user_id,))
         conn.commit()
     return {"ok": True}
-
-@app.post("/api/v1/byok/set-key-by-chat")
-async def byok_set_key_by_chat(request: Request):
-    """Set Anthropic key by Telegram chat_id — chat_id proves identity, no auth token needed."""
-    data = await request.json()
-    chat_id = str(data.get("chat_id", "")).strip()
-    anthropic_key = data.get("anthropic_key", "").strip()
-    if not anthropic_key.startswith("sk-ant-"):
-        raise HTTPException(status_code=400, detail="Invalid Anthropic key format")
-    if not chat_id:
-        raise HTTPException(status_code=400, detail="chat_id required")
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT api_key FROM users WHERE telegram_chat_id = ?", (chat_id,)
-        ).fetchone()
-        if not row:
-            raise HTTPException(
-                status_code=404,
-                detail="No account linked to this Telegram. Sign up at swarmsfall.com then link with /connect"
-            )
-        save_user_anthropic_key(row[0], anthropic_key)
-    finally:
-        conn.close()
-    return {"status": "saved"}
-
-
-@app.get("/api/v1/byok/status")
-async def byok_status(api_key: str = Depends(get_api_key)):
-    """Check whether a BYOK key is set for this user."""
-    conn = get_db()
-    try:
-        row = conn.execute(
-            "SELECT anthropic_key FROM users WHERE api_key = ?", (api_key,)
-        ).fetchone()
-    finally:
-        conn.close()
-    has_key = bool(row and row[0] and row[0].startswith("sk-ant-"))
-    return {"byok_active": has_key}
-
-
-@app.post("/api/v1/byok/set-key")
-async def byok_set_key(request: Request, api_key: str = Depends(get_api_key)):
-    """Save user's Anthropic key server-side. Requires platform API key auth."""
-    data = await request.json()
-    anthropic_key = data.get("anthropic_key", "").strip()
-    if not anthropic_key.startswith("sk-ant-"):
-        raise HTTPException(status_code=400, detail="Invalid Anthropic key format — must start with sk-ant-")
-    save_user_anthropic_key(api_key, anthropic_key)
-    return {"status": "saved"}
-
 
 # ─── TELEGRAM ACCOUNT LINKING ────────────────────────────────
 
