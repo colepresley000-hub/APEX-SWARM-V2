@@ -38,28 +38,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("apex-swarm")
 
 # ─── CONFIG ───────────────────────────────────────────────
-
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20241022")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN)
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_STARTER_PRICE = os.getenv("STRIPE_STARTER_PRICE", "")
-STRIPE_PRO_PRICE = os.getenv("STRIPE_PRO_PRICE", "")
-STRIPE_ENTERPRISE_PRICE = os.getenv("STRIPE_ENTERPRISE_PRICE", "")
-JWT_SECRET = os.getenv("JWT_SECRET", "apex-swarm-jwt-secret-change-in-prod")
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-BASE_URL = os.getenv("BASE_URL", "https://apex-swarm-v2-production.up.railway.app")
-SLACK_DEFAULT_CHANNEL = os.getenv("SLACK_DEFAULT_CHANNEL", "#ai-workforce")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "apex_swarm.db")
-PORT = int(os.getenv("PORT", "8080"))
-VERSION = "4.0.0"
-TWITTERBOT_URL = os.getenv("TWITTERBOT_URL", "")          # e.g. https://apex-twitterbot.up.railway.app
-TWITTERBOT_SECRET = os.getenv("TWITTERBOT_SECRET", "")    # shared secret (CONTROL_API_SECRET in bot_service)
+# All env-derived constants now live in config.py (single source of truth).
+# Imported by name so the module namespace is identical to before.
+from config import (
+    ANTHROPIC_API_KEY,
+    CLAUDE_MODEL,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_ENABLED,
+    TELEGRAM_CHAT_ID,
+    SLACK_WEBHOOK_URL,
+    SLACK_DEFAULT_CHANNEL,
+    STRIPE_SECRET_KEY,
+    STRIPE_WEBHOOK_SECRET,
+    STRIPE_STARTER_PRICE,
+    STRIPE_PRO_PRICE,
+    STRIPE_ENTERPRISE_PRICE,
+    JWT_SECRET,
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    BASE_URL,
+    DATABASE_PATH,
+    PORT,
+    VERSION,
+    TWITTERBOT_URL,
+    TWITTERBOT_SECRET,
+)
 
 # ─── OPTIONAL MODULE IMPORTS (graceful degradation) ───────
 
