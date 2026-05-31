@@ -5529,20 +5529,6 @@ async def demo_page(): return HTMLResponse(DEMO_HTML)
 @app.get("/accept-invite", response_class=HTMLResponse)
 async def accept_invite_page(): return HTMLResponse(ACCEPT_INVITE_HTML)
 
-@app.get("/signup", response_class=HTMLResponse)
-async def signup_page(): return HTMLResponse(SIGNUP_HTML)
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page_new(): return HTMLResponse(LOGIN_HTML_NEW)
-
-@app.get("/pricing", response_class=HTMLResponse)
-async def pricing_page(): return HTMLResponse(PRICING_HTML)
-
-@app.get("/demo", response_class=HTMLResponse)
-
-@app.get("/accept-invite", response_class=HTMLResponse)
-async def accept_invite_page(): return HTMLResponse(ACCEPT_INVITE_HTML)
-
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
     return HTMLResponse(LANDING_HTML)
