@@ -3080,14 +3080,9 @@ async def configure_slack(request: Request, api_key: str = Depends(get_api_key))
         return {"status":"configured","scope":"org"}
     return {"status":"configured","scope":"global"}
 
-@app.post("/api/v1/slack/test")
-async def test_slack(request: Request):
-    data = await request.json()
-    webhook = data.get("webhook_url") or SLACK_WEBHOOK_URL
-    if not webhook:
-        raise HTTPException(400,"No Slack webhook configured")
-    ok = await send_slack_message("APEX SWARM connected to Slack! Your AI workforce is ready.",webhook_url=webhook)
-    return {"success":ok}
+# NOTE: POST /api/v1/slack/test is defined once, below (authenticated). An
+# earlier UNAUTHENTICATED duplicate that lived here was removed — it let any
+# caller ping the configured Slack webhook without a key.
 
 @app.post("/api/v1/slack/commands")
 async def slack_commands(request: Request):
@@ -3255,37 +3250,11 @@ async def god_eye_status():
 
 # ─── USAGE & COST ENDPOINTS ──────────────────────────────
 
-@app.get("/api/v1/usage")
-async def get_usage(api_key: str = Depends(get_api_key), days: int = 30):
-    """Get token usage and cost summary."""
-    conn = get_db()
-    try:
-        # Total usage
-        row = db_fetchone(conn,
-            f"SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cost_usd),0), COUNT(*) FROM usage_log WHERE {USER_KEY_COL} = ?",
-            (api_key,),
-        )
-        total_input, total_output, total_cost, total_calls = row if row else (0, 0, 0, 0)
-
-        # Per-agent breakdown
-        rows = db_fetchall(conn,
-            f"SELECT agent_type, SUM(input_tokens), SUM(output_tokens), SUM(cost_usd), COUNT(*) FROM usage_log WHERE {USER_KEY_COL} = ? GROUP BY agent_type ORDER BY SUM(cost_usd) DESC LIMIT 20",
-            (api_key,),
-        )
-        by_agent = [
-            {"agent_type": r[0], "input_tokens": r[1], "output_tokens": r[2], "cost_usd": round(r[3], 6), "calls": r[4]}
-            for r in rows
-        ]
-    finally:
-        conn.close()
-
-    return {
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_cost_usd": round(total_cost, 6),
-        "total_calls": total_calls,
-        "by_agent": by_agent,
-    }
+# NOTE: GET /api/v1/usage is defined once, below (the period-based handler:
+# ?period=today|week|month|all). An earlier duplicate that lived here returned
+# a flat all-time shape and — because Starlette matches the FIRST registration —
+# shadowed the period handler, breaking the dashboard usage tab (which reads
+# d.usage.*, d.today.*, d.tier, d.daily_breakdown, d.by_agent_type). Removed.
 
 
 @app.post("/api/v1/license/validate")
@@ -5424,28 +5393,13 @@ async def slack_webhook(request: Request):
     return {"ok": True}
 
 
-@app.post("/api/v1/slack/configure")
-async def configure_slack(request: Request, api_key: str = Depends(get_api_key)):
-    """Configure Slack webhook for this user/org."""
-    data = await request.json()
-    webhook = data.get("webhook_url", "")
-    channel = data.get("channel", "#ai-workforce")
-    # If org member, update their org
-    member = get_member_by_key(api_key)
-    if member:
-        conn = get_db()
-        try:
-            db_execute(conn, "UPDATE orgs SET slack_webhook = ?, slack_channel = ? WHERE id = ?",
-                      (webhook, channel, member["org_id"]))
-            conn.commit()
-        finally:
-            conn.close()
-        return {"status": "configured", "scope": "org", "org_id": member["org_id"]}
-    return {"status": "configured", "scope": "global", "note": "Set SLACK_WEBHOOK_URL env var for persistent config"}
+# NOTE: POST /api/v1/slack/configure is defined once, above (also authenticated).
+# A near-identical duplicate that lived here was dead code (shadowed by the
+# earlier registration) and has been removed.
 
 @app.post("/api/v1/slack/test")
 async def test_slack(request: Request, api_key: str = Depends(get_api_key)):
-    """Send a test message to Slack."""
+    """Send a test message to Slack. Authenticated — requires a valid API key."""
     data = await request.json()
     webhook = data.get("webhook_url") or SLACK_WEBHOOK_URL
     if not webhook:
