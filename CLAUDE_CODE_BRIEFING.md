@@ -67,19 +67,21 @@ shared logic goes in a leaf module.
 
 ---
 
-## Known cleanup findings (from refactor audit, 2026-05-31)
+## Known cleanup findings (from refactor audit, 2026-05-31) — RESOLVED 2026-06-01
 
 Duplicate route definitions where Starlette matches the FIRST registration, so
-the second is dead code. These were NOT auto-fixed because they differ in
-behavior (a fix is a product/security decision, not a refactor):
-- **`POST /api/v1/slack/test`** — the LIVE handler (main.py ~3083) has **no
-  auth**; an authenticated duplicate exists but is shadowed/dead (~5447).
-  Minor abuse vector (unauth'd caller can ping the default Slack webhook).
-  Fix = delete the unauth'd one so the auth'd version wins.
-- **`GET /api/v1/usage`** — two different implementations (`days=30` vs
-  `period=month`); first wins, second dead. Pick the intended one.
-- **`POST /api/v1/slack/configure`** — duplicated; both auth'd, near-identical.
-  Benign; second is dead.
+the second is dead code. All three below were fixed in commit `584b45e` and
+deployed (build 863b49df). Verified live.
+- **`POST /api/v1/slack/test`** — ✅ FIXED. The live handler had **no auth**;
+  removed it so the authenticated version is now the sole/live handler. Verified:
+  unauth'd POST now returns 401 (was 200).
+- **`GET /api/v1/usage`** — ✅ FIXED. The flat `days=30` handler was shadowing
+  the `period=month` handler the dashboard actually calls (`?period=...`). The
+  usage tab reads `d.usage.*/d.today.*/d.tier/d.daily_breakdown/d.by_agent_type`,
+  none of which the flat shape returned — so the tab was silently failing.
+  Removed the flat one; verified live `/usage` now returns the rich shape.
+- **`POST /api/v1/slack/configure`** — ✅ FIXED. Removed the dead near-identical
+  duplicate; the live handler is unchanged.
 
 ---
 
