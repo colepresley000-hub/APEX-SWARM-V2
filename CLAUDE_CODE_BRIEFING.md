@@ -156,9 +156,29 @@ cd /Users/revcole/apex-agent/apex-swarm-v2
 python3 -m py_compile main.py  # always syntax-check first
 git add main.py channels.py
 git commit -m "your message"
-railway up
+railway up --detach
+railway deployment list | head -3   # wait for newest → SUCCESS
 railway logs --lines 30
 ```
+
+### Deploy gotcha (railway up "Indexing..." then EXIT=1)
+`railway up` tars the working dir. If the Claude Code sandbox daemon socket
+(`~/.docker/sandboxes/sandboxd.sock`) gets pulled into the build context, tar
+aborts with "socket can not be archived" and railway exits 1 (a background
+wrapper may still report exit 0 — check the inner EXIT code). `.railwayignore`
+does NOT fix it (the socket is outside the project root).
+**Workaround that works:** deploy from a clean export of the committed tree:
+```bash
+rm -rf /tmp/apex-deploy && mkdir -p /tmp/apex-deploy
+git archive --format=tar HEAD | tar -x -C /tmp/apex-deploy
+cp railway.json cole_persona.py /tmp/apex-deploy/
+cd /tmp/apex-deploy
+railway link --project 98a99216-8f59-4d54-bcd2-e55ea0471786 \
+  --environment production --service ca13292e-850e-40a2-9049-cc81e64ed56c
+railway up --detach
+```
+Per-directory link state lives in `~/.railway/config.json`, so linking the temp
+dir does not disturb the project dir's link.
 
 ---
 
