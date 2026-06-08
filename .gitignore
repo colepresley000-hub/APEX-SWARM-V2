@@ -2,7 +2,9 @@
 *.db
 *.db-shm
 *.db-wal
-.claude/
+# .claude — ignore local-only state; track skills and launch config
+.claude/settings.local.json
+.claude/worktrees/
 __pycache__/
 *.log
 .fuse_hidden*
