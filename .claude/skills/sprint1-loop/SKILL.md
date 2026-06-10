@@ -1,6 +1,7 @@
 ---
 name: sprint1-loop
 description: Autonomous Sprint-1 module decomposition loop for APEX SWARM. Extracts route groups from main.py into routes/*.py one at a time, smoke-tests after every extraction, commits on pass, loops until no more safe extractions remain. Use when the user says "continue the refactor", "keep extracting", "sprint1 loop", or "keep going on main.py". NEVER deploys — reports when done and asks.
+context: fork
 ---
 
 # APEX SWARM — Sprint-1 Extraction Loop

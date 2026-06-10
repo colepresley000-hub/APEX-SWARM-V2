@@ -1,6 +1,7 @@
 ---
 name: deploy-apex
 description: Full verified deploy of APEX SWARM to production (swarmsfall.com). Runs compile check → smoke test → clean-export upload → polls Railway until SUCCESS → verifies prod routes. Use whenever the user says "deploy", "ship it", "railway up", or "push to prod". NEVER deploy if smoke test fails — stop and report instead.
+context: fork
 ---
 
 # APEX SWARM — Verified Production Deploy
