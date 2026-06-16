@@ -92,6 +92,19 @@ APEX = BrandConfig(
         "bg": "#0A0E14", "fg": "#FFFFFF", "accent": "#F5C518",
         "footer": "swarmsfall.com", "label": "APEX SWARM",
     },
+    reply_keywords=[
+        "hiring a VA", "virtual assistant", "upwork proposals",
+        "solo founder", "indie hacker", "too many SaaS tools",
+        "automate my business", "AI agents", "building in public",
+    ],
+    reply_accounts=[],
+    reply_guidance=(
+        "Reply as a helpful peer, NOT a salesperson. Add genuine value or insight first. "
+        "Only mention Apex Swarm / swarmsfall.com if it's naturally relevant — and at most "
+        "as a soft aside, never a hard pitch. Match the tone of the original tweet. "
+        "Under 240 chars. No hashtags, no em dashes. Sound human."
+    ),
+    reply_daily_cap=12,
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -187,6 +200,20 @@ MAASAI = BrandConfig(
         "bg": "#1A1207", "fg": "#FFFFFF", "accent": "#C8472B",
         "footer": "maasai.vc", "label": "MAASAI VC",
     },
+    reply_keywords=[
+        "raising for my startup", "African startup", "African SaaS",
+        "fundraising in Africa", "VC ignored", "too early for Africa",
+        "building in Lagos", "building in Nairobi", "African founders",
+        "startup funding gap", "raising a seed round",
+    ],
+    reply_accounts=[],
+    reply_guidance=(
+        "Reply as an insider who knows African tech, NOT a VC pitching. Lead with empathy "
+        "or a sharp insight. Only mention Maasai / maasai.vc if the founder is clearly "
+        "talking about raising capital, and keep it soft. Under 240 chars. No hashtags, "
+        "no em dashes. Sound like a real person in the ecosystem."
+    ),
+    reply_daily_cap=10,
 )
 
 # Registry

@@ -82,6 +82,11 @@ class BrandConfig:
     draft_env: str                 # env var name toggling draft mode
     # Visual theme (used by visual_cards.py)
     theme: dict = field(default_factory=dict)
+    # Reply engine config
+    reply_keywords: list = field(default_factory=list)   # search terms to monitor
+    reply_accounts: list = field(default_factory=list)    # @handles to monitor (no @)
+    reply_guidance: str = ""                              # how to reply for this brand
+    reply_daily_cap: int = 15                             # max approved replies/day
 
     # ── derived ──
     @property
@@ -107,6 +112,10 @@ class BrandConfig:
     @property
     def winners_file(self) -> Path:
         return DATA_DIR / f"{self.key}_winners.json"
+
+    @property
+    def reply_queue_file(self) -> Path:
+        return DATA_DIR / f"{self.key}_reply_queue.json"
 
     @property
     def drafts_dir(self) -> Path:

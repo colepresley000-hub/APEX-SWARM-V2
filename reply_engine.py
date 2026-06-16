@@ -1,0 +1,293 @@
+"""
+reply_engine.py — engagement growth via approved replies.
+=========================================================
+The real X growth lever: contextual, value-first replies to relevant
+conversations. ALWAYS human-in-the-loop — nothing posts without your tap.
+
+Flow:
+  1. scan  : find candidate tweets (keywords/accounts), draft replies with
+             Claude, enqueue them, and push each to Telegram with
+             Approve / Skip inline buttons.
+  2. worker: long-poll Telegram; on Approve -> post the reply; on Skip -> drop.
+
+Commands:
+  python reply_engine.py scan apex          # find + draft + send to Telegram
+  python reply_engine.py scan maasai
+  python reply_engine.py worker             # process approvals (run persistently)
+  python reply_engine.py queue apex         # show pending queue
+
+SAFETY:
+  - Nothing posts automatically. You approve each reply in Telegram.
+  - Daily cap per brand (brand.reply_daily_cap).
+  - Already-seen tweets are never re-queued.
+
+API NOTE:
+  Tweet search (search_recent_tweets) requires X API **Basic tier or higher**
+  ($100/mo). On the Free tier it returns 403. The engine degrades gracefully
+  and tells you. Posting replies works on any write-enabled tier.
+"""
+
+import sys
+import json
+import time
+import logging
+from datetime import datetime, date
+
+import tweepy
+import social_core as sc
+from brands import BRANDS
+
+log = logging.getLogger("reply_engine")
+
+MIN_LIKES = 2          # ignore zero-engagement noise
+MAX_CANDIDATES = 8     # per scan, per brand
+TG_API = "https://api.telegram.org/bot{token}/{method}"
+
+
+# ── Queue persistence ─────────────────────────────────────────────────────────
+def load_queue(brand) -> dict:
+    f = brand.reply_queue_file
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {"pending": [], "seen_ids": [], "history": []}
+
+def save_queue(brand, q: dict):
+    q["seen_ids"] = q["seen_ids"][-2000:]
+    q["history"] = q["history"][-500:]
+    brand.reply_queue_file.write_text(json.dumps(q, indent=2))
+
+def _approved_today(q: dict) -> int:
+    today = date.today().isoformat()
+    return sum(1 for h in q["history"]
+               if h.get("status") == "approved" and h.get("at", "").startswith(today))
+
+
+# ── Candidate search ──────────────────────────────────────────────────────────
+def find_candidates(brand, q: dict) -> list:
+    client = sc.v2_client(brand)
+    seen = set(q["seen_ids"])
+    found = []
+
+    # Build a single OR query from keywords; exclude RTs/replies; English
+    if brand.reply_keywords:
+        terms = " OR ".join(f'"{k}"' for k in brand.reply_keywords[:10])
+        query = f"({terms}) -is:retweet -is:reply lang:en"
+        try:
+            resp = client.search_recent_tweets(
+                query=query, max_results=20,
+                tweet_fields=["public_metrics", "author_id", "created_at", "lang"],
+            )
+            for t in (resp.data or []):
+                if str(t.id) in seen:
+                    continue
+                m = t.public_metrics or {}
+                if m.get("like_count", 0) < MIN_LIKES:
+                    continue
+                found.append({
+                    "id": str(t.id),
+                    "text": t.text,
+                    "author_id": str(t.author_id),
+                    "metrics": m,
+                })
+        except tweepy.errors.Forbidden:
+            print(f"[{brand.key}] ⚠️  search_recent_tweets returned 403 — "
+                  f"X API Basic tier ($100/mo) required for search. "
+                  f"Reply posting still works; only auto-discovery is gated.")
+        except tweepy.TweepyException as e:
+            log.warning(f"[{brand.key}] search failed: {e}")
+
+    return found[:MAX_CANDIDATES]
+
+
+# ── Reply drafting ────────────────────────────────────────────────────────────
+def draft_reply(brand, tweet_text: str) -> str:
+    client = sc.anthropic_client()
+    msg = client.messages.create(
+        model=sc.CLAUDE_MODEL,
+        max_tokens=160,
+        system=[{"type": "text",
+                 "text": brand.system_prompt + "\n\nREPLY MODE:\n" + brand.reply_guidance,
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": brand.product_context}],
+        messages=[{"role": "user", "content": (
+            f"Someone tweeted:\n\"{tweet_text}\"\n\n"
+            "Write a single reply that adds genuine value and feels human. "
+            "Follow the REPLY MODE rules exactly. Output only the reply text."
+        )}],
+    )
+    return sc.clean_text(msg.content[0].text)
+
+
+# ── Telegram approval ─────────────────────────────────────────────────────────
+def _tg(method, payload):
+    import requests
+    url = TG_API.format(token=sc.TELEGRAM_BOT_TOKEN, method=method)
+    try:
+        return requests.post(url, json=payload, timeout=20).json()
+    except Exception as e:
+        log.error(f"Telegram {method} failed: {e}")
+        return None
+
+def send_for_approval(brand, item: dict):
+    orig = item["candidate_text"]
+    reply = item["reply_text"]
+    tweet_url = f"https://x.com/i/web/status/{item['tweet_id']}"
+    text = (
+        f"<b>🔁 {brand.name} reply draft</b>\n\n"
+        f"<b>They said:</b>\n{orig[:280]}\n\n"
+        f"<b>Your reply ({len(reply)} chars):</b>\n{reply}\n\n"
+        f"<a href=\"{tweet_url}\">view original tweet</a>"
+    )
+    markup = {"inline_keyboard": [[
+        {"text": "✅ Approve & post", "callback_data": f"rok:{brand.key}:{item['id']}"},
+        {"text": "✏️ Skip",           "callback_data": f"rno:{brand.key}:{item['id']}"},
+    ]]}
+    _tg("sendMessage", {
+        "chat_id": sc.TELEGRAM_CHAT_ID, "text": text,
+        "parse_mode": "HTML", "disable_web_page_preview": True,
+        "reply_markup": markup,
+    })
+
+
+# ── Scan command ──────────────────────────────────────────────────────────────
+def scan(brand):
+    if not brand.has_tokens():
+        print(f"[{brand.key}] no tokens set; skipping (run get_twitter_tokens.py)")
+        return
+    q = load_queue(brand)
+    remaining = brand.reply_daily_cap - _approved_today(q)
+    if remaining <= 0:
+        print(f"[{brand.key}] daily cap ({brand.reply_daily_cap}) reached")
+        return
+
+    candidates = find_candidates(brand, q)
+    if not candidates:
+        print(f"[{brand.key}] no new candidates this scan")
+        return
+
+    n_new = 0
+    for c in candidates:
+        reply = draft_reply(brand, c["text"])
+        if not reply or len(reply) > 280:
+            continue
+        item = {
+            "id": f"{brand.key}_{c['id']}",
+            "tweet_id": c["id"],
+            "candidate_text": c["text"],
+            "reply_text": reply,
+            "queued_at": datetime.now().isoformat(),
+            "status": "pending",
+        }
+        q["pending"].append(item)
+        q["seen_ids"].append(c["id"])
+        send_for_approval(brand, item)
+        n_new += 1
+        time.sleep(1)
+
+    save_queue(brand, q)
+    print(f"[{brand.key}] queued {n_new} draft replies → check Telegram to approve")
+
+
+# ── Approval worker (long-poll Telegram) ──────────────────────────────────────
+def _post_reply(brand, item) -> bool:
+    if brand.draft_mode:
+        log.info(f"[{brand.key}] DRAFT MODE — would reply: {item['reply_text']}")
+        return True
+    client = sc.v2_client(brand)
+    try:
+        client.create_tweet(text=item["reply_text"],
+                            in_reply_to_tweet_id=item["tweet_id"])
+        return True
+    except tweepy.TweepyException as e:
+        log.error(f"[{brand.key}] reply post failed: {e}")
+        return False
+
+def _find_item(brand_key, item_id):
+    brand = BRANDS[brand_key]
+    q = load_queue(brand)
+    for it in q["pending"]:
+        if it["id"] == item_id:
+            return brand, q, it
+    return brand, q, None
+
+def worker():
+    if not sc.TELEGRAM_BOT_TOKEN:
+        print("Telegram not configured"); return
+    print("Reply approval worker started — waiting for taps. Ctrl-C to stop.")
+    offset = None
+    while True:
+        resp = _tg("getUpdates", {"timeout": 30, "offset": offset,
+                                  "allowed_updates": ["callback_query"]})
+        if not resp or not resp.get("ok"):
+            time.sleep(3); continue
+        for upd in resp["result"]:
+            offset = upd["update_id"] + 1
+            cq = upd.get("callback_query")
+            if not cq:
+                continue
+            data = cq.get("data", "")
+            if not (data.startswith("rok:") or data.startswith("rno:")):
+                continue
+            _, brand_key, item_id = data.split(":", 2)
+            action = "approved" if data.startswith("rok:") else "skipped"
+            brand, q, item = _find_item(brand_key, item_id)
+            if not item:
+                _tg("answerCallbackQuery", {"callback_query_id": cq["id"],
+                                            "text": "Already handled"})
+                continue
+
+            note = "skipped"
+            if action == "approved":
+                ok = _post_reply(brand, item)
+                note = "posted ✅" if ok else "post FAILED ❌"
+                item["status"] = "approved" if ok else "failed"
+            else:
+                item["status"] = "skipped"
+
+            q["pending"] = [p for p in q["pending"] if p["id"] != item_id]
+            q["history"].append({"id": item_id, "status": item["status"],
+                                 "at": datetime.now().isoformat()})
+            save_queue(brand, q)
+            _tg("answerCallbackQuery", {"callback_query_id": cq["id"], "text": note})
+            # edit the message to show resolution
+            msg = cq.get("message", {})
+            if msg:
+                _tg("editMessageText", {
+                    "chat_id": msg["chat"]["id"], "message_id": msg["message_id"],
+                    "text": msg.get("text", "") + f"\n\n— {note}",
+                    "disable_web_page_preview": True,
+                })
+
+
+def show_queue(brand):
+    q = load_queue(brand)
+    print(f"[{brand.key}] pending: {len(q['pending'])}, "
+          f"approved today: {_approved_today(q)}/{brand.reply_daily_cap}")
+    for it in q["pending"]:
+        print(f"  - reply: {it['reply_text'][:90]}")
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__); return
+    cmd = sys.argv[1]
+    if cmd == "scan":
+        target = sys.argv[2] if len(sys.argv) > 2 else "all"
+        brands = BRANDS.values() if target == "all" else [BRANDS[target]]
+        for b in brands:
+            scan(b)
+    elif cmd == "worker":
+        worker()
+    elif cmd == "queue":
+        target = sys.argv[2] if len(sys.argv) > 2 else "apex"
+        show_queue(BRANDS[target])
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()
