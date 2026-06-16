@@ -39,9 +39,17 @@ from brands import BRANDS
 
 log = logging.getLogger("reply_engine")
 
+import os
+
 MIN_LIKES = 2          # ignore zero-engagement noise
 MAX_CANDIDATES = 8     # per scan, per brand
 TG_API = "https://api.telegram.org/bot{token}/{method}"
+
+# Use a DEDICATED approval bot to avoid 409 conflicts with the live bot's
+# getUpdates poller (main.py + apexunclebot.py already poll TELEGRAM_BOT_TOKEN).
+# Create one via @BotFather, put its token in .env as TELEGRAM_APPROVAL_BOT_TOKEN.
+APPROVAL_TOKEN = os.getenv("TELEGRAM_APPROVAL_BOT_TOKEN", "") or sc.TELEGRAM_BOT_TOKEN
+_DEDICATED = bool(os.getenv("TELEGRAM_APPROVAL_BOT_TOKEN", ""))
 
 
 # ── Queue persistence ─────────────────────────────────────────────────────────
@@ -124,9 +132,9 @@ def draft_reply(brand, tweet_text: str) -> str:
 # ── Telegram approval ─────────────────────────────────────────────────────────
 def _tg(method, payload):
     import requests
-    url = TG_API.format(token=sc.TELEGRAM_BOT_TOKEN, method=method)
+    url = TG_API.format(token=APPROVAL_TOKEN, method=method)
     try:
-        return requests.post(url, json=payload, timeout=20).json()
+        return requests.post(url, json=payload, timeout=35).json()
     except Exception as e:
         log.error(f"Telegram {method} failed: {e}")
         return None
@@ -154,6 +162,10 @@ def send_for_approval(brand, item: dict):
 
 # ── Scan command ──────────────────────────────────────────────────────────────
 def scan(brand):
+    if not _DEDICATED:
+        print(f"[{brand.key}] skipped — set TELEGRAM_APPROVAL_BOT_TOKEN in .env first "
+              f"(dedicated @BotFather bot, avoids conflict with the live bot).")
+        return
     if not brand.has_tokens():
         print(f"[{brand.key}] no tokens set; skipping (run get_twitter_tokens.py)")
         return
@@ -214,8 +226,14 @@ def _find_item(brand_key, item_id):
     return brand, q, None
 
 def worker():
-    if not sc.TELEGRAM_BOT_TOKEN:
+    if not APPROVAL_TOKEN:
         print("Telegram not configured"); return
+    if not _DEDICATED:
+        print("⚠️  TELEGRAM_APPROVAL_BOT_TOKEN not set — falling back to the main bot "
+              "token. This WILL conflict (409) with main.py/apexunclebot pollers.\n"
+              "    Create a dedicated bot via @BotFather and set "
+              "TELEGRAM_APPROVAL_BOT_TOKEN in .env before running the worker.")
+        return
     print("Reply approval worker started — waiting for taps. Ctrl-C to stop.")
     offset = None
     while True:
