@@ -46,16 +46,24 @@ def refresh_winners(brand) -> dict:
         print(f"[{brand.key}] no posted tweets yet")
         return {"brand": brand.key, "scored": 0}
 
-    # Collect tweet ids we have on record (skip threads' child ids)
+    # Collect tweet ids we have on record (skip threads' child ids).
+    # Normalize ids to str so they match str(t.id) from the API regardless of
+    # whether older entries stored ids as int or str.
     recent = posted[-LOOKBACK:]
-    id_map = {e["id"]: e for e in recent if e.get("id")}
+    id_map = {str(e["id"]): e for e in recent if e.get("id")}
     ids = list(id_map.keys())
+
+    if not ids:
+        print(f"[{brand.key}] no scoreable tweet ids on record")
+        return {"brand": brand.key, "scored": 0}
 
     client = sc.v2_client(brand)
     scored = []
     # X API allows 100 ids per get_tweets call
     for i in range(0, len(ids), 100):
         batch = ids[i:i+100]
+        if not batch:
+            continue
         try:
             resp = client.get_tweets(batch, tweet_fields=["public_metrics"])
         except tweepy.TweepyException as e:
@@ -75,7 +83,11 @@ def refresh_winners(brand) -> dict:
     scored.sort(key=lambda x: x["score"], reverse=True)
     winners = [w for w in scored if w["score"] > 0][:MAX_WINNERS]
 
-    brand.winners_file.write_text(json.dumps(winners, indent=2))
+    # Atomic-ish write: temp file + rename so a crash mid-write can't corrupt JSON.
+    wf = brand.winners_file
+    tmp = wf.with_suffix(wf.suffix + ".tmp")
+    tmp.write_text(json.dumps(winners, indent=2))
+    tmp.replace(wf)
 
     # Category performance summary
     cat_perf = {}
@@ -97,7 +109,13 @@ def refresh_winners(brand) -> dict:
 
 def main():
     target = sys.argv[1] if len(sys.argv) > 1 else "all"
-    brands = BRANDS.values() if target == "all" else [BRANDS[target]]
+    if target == "all":
+        brands = list(BRANDS.values())
+    elif target in BRANDS:
+        brands = [BRANDS[target]]
+    else:
+        print(f"Unknown brand '{target}'. Available: {list(BRANDS)} or 'all'")
+        sys.exit(1)
     summary = [refresh_winners(b) for b in brands]
     print("\n" + json.dumps(summary, indent=2))
 

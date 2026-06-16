@@ -49,8 +49,13 @@ class XChannel(Channel):
     name = "x"
     def enabled(self): return True  # primary channel
     def adapt(self, brand, idea):
-        # X idea is already tweet-shaped; ensure length
-        return idea if len(idea) <= 280 else sc._shorten(brand, idea)
+        # X idea is already tweet-shaped; ensure length. _shorten may itself
+        # return something >280 (it's a best-effort rewrite), so hard-cap as
+        # a final guard before posting.
+        if len(idea) <= 280:
+            return idea
+        shortened = sc._shorten(brand, idea)
+        return shortened if len(shortened) <= 280 else shortened[:280]
     def post(self, brand, text, media_path=None):
         return sc.post_tweet(brand, text, "crosspost", media_path=media_path)
 

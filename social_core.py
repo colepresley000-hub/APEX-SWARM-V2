@@ -162,19 +162,28 @@ def load_rotation(brand: BrandConfig) -> list:
             pass
     return []
 
+def _atomic_write(path: Path, text: str):
+    """Write via temp file + rename so a crash mid-write can't corrupt the JSON."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
 def save_rotation(brand: BrandConfig, used: list):
-    brand.rotation_file.write_text(json.dumps(used[-15:]))
+    _atomic_write(brand.rotation_file, json.dumps(used[-15:]))
 
 def pick_category(brand: BrandConfig, force: Optional[str] = None) -> dict:
+    pool = brand.weighted_pool or brand.categories
+    if not pool:
+        raise ValueError(f"[{brand.key}] no categories configured")
     if force:
         for c in brand.categories:
             if c["name"] == force:
                 return c
-        return random.choice(brand.weighted_pool)
+        return random.choice(pool)
     recent = load_rotation(brand)
     avoid = set(recent[-5:])
-    available = [c for c in brand.weighted_pool if c["name"] not in avoid]
-    return random.choice(available or brand.weighted_pool)
+    available = [c for c in pool if c["name"] not in avoid]
+    return random.choice(available or pool)
 
 
 # ── Posted log + winners (feedback loop) ──────────────────────────────────────
@@ -189,7 +198,7 @@ def load_posted(brand: BrandConfig) -> list:
 def append_posted(brand: BrandConfig, entry: dict):
     data = load_posted(brand)
     data.append(entry)
-    brand.posted_file.write_text(json.dumps(data[-500:], indent=2))
+    _atomic_write(brand.posted_file, json.dumps(data[-500:], indent=2))
 
 def load_winners(brand: BrandConfig) -> list:
     if brand.winners_file.exists():
@@ -209,6 +218,9 @@ def get_recent_tweets(brand: BrandConfig, n: int = 10) -> list:
                                              tweet_fields=["text"])
         else:
             me = client.get_me()
+            if not me or not me.data:
+                log.warning(f"[{brand.key}] get_me returned no user; skipping recent fetch")
+                return []
             result = client.get_users_tweets(id=me.data.id, max_results=max(5, n),
                                              tweet_fields=["text"])
         if result and result.data:
@@ -241,6 +253,13 @@ STYLE_VARIATIONS = [
     "Make it feel like something said in a founders WhatsApp group.",
 ]
 
+def _first_text(msg) -> str:
+    """Pull the first text block from a Claude response, tolerating empty/non-text content."""
+    for block in getattr(msg, "content", None) or []:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    return ""
+
 def _system_blocks(brand: BrandConfig):
     """Structured system blocks: stable cached prompt + product context."""
     return [
@@ -260,7 +279,13 @@ def _winners_block(brand: BrandConfig) -> str:
     if not winners:
         return ""
     top = winners[:5]
-    lines = "\n".join(f"• {w['text'][:160]}" for w in top)
+    lines = "\n".join(
+        f"• {str(w.get('text', ''))[:160]}"
+        for w in top
+        if isinstance(w, dict) and w.get("text")
+    )
+    if not lines:
+        return ""
     return (
         "\n\nThese past tweets performed BEST (high engagement). "
         "Match their energy, structure, and specificity — but do NOT copy them:\n"
@@ -294,7 +319,7 @@ def generate_tweet(brand: BrandConfig, category: dict, recent_tweets=None) -> st
         messages=[{"role": "user", "content": prompt}],
     )
     _log_usage(brand, msg.usage)
-    tweet = clean_text(msg.content[0].text)
+    tweet = clean_text(_first_text(msg))
 
     if len(tweet) > 280:
         tweet = _shorten(brand, tweet)
@@ -314,7 +339,10 @@ def _shorten(brand: BrandConfig, tweet: str) -> str:
             f"Output only the shortened tweet.\n\n{tweet}"
         )}],
     )
-    out = clean_text(msg.content[0].text)
+    out = clean_text(_first_text(msg))
+    if not out:
+        # Shorten returned nothing usable; hard-truncate the original as a last resort.
+        return tweet[:277] + "..."
     return out if len(out) <= 280 else out[:277] + "..."
 
 def _log_usage(brand: BrandConfig, usage):
@@ -348,7 +376,7 @@ def generate_thread(brand: BrandConfig, topic_brief: str, n_tweets: int = 5) -> 
         messages=[{"role": "user", "content": prompt}],
     )
     _log_usage(brand, msg.usage)
-    raw = msg.content[0].text.strip()
+    raw = _first_text(msg).strip()
     parts = [clean_text(p) for p in raw.split("---")]
     tweets = [p for p in parts if p]
     # Enforce length
@@ -383,6 +411,9 @@ def post_tweet(brand: BrandConfig, text: str, category_name: str,
 
     try:
         resp = client.create_tweet(text=text, media_ids=media_ids)
+        if not resp or not resp.data or not resp.data.get("id"):
+            log.error(f"[{brand.key}] create_tweet returned no tweet id: {resp}")
+            return None
         tweet_id = resp.data["id"]
         entry = {
             "id": str(tweet_id),
@@ -405,35 +436,59 @@ def post_tweet(brand: BrandConfig, text: str, category_name: str,
         return None
 
 def post_thread(brand: BrandConfig, tweets: list) -> Optional[dict]:
+    tweets = [t for t in (tweets or []) if t]
+    if not tweets:
+        log.error(f"[{brand.key}] post_thread called with no tweets")
+        return None
+
     if brand.draft_mode:
         _save_draft(brand, "\n\n---\n\n".join(tweets), "thread")
         return {"mode": "draft", "tweets": tweets}
 
     client = v2_client(brand)
+    reply_to = None
+    ids = []
     try:
-        reply_to = None
-        ids = []
         for t in tweets:
             resp = client.create_tweet(text=t, in_reply_to_tweet_id=reply_to)
+            if not resp or not resp.data or not resp.data.get("id"):
+                raise tweepy.TweepyException(f"create_tweet returned no id: {resp}")
             reply_to = resp.data["id"]
             ids.append(str(reply_to))
             time.sleep(1)
-        entry = {
-            "id": ids[0],
-            "category": "thread",
-            "text": tweets[0],
-            "thread_ids": ids,
-            "posted_at": datetime.now().isoformat(),
-        }
-        append_posted(brand, entry)
-        recent = load_rotation(brand)
-        recent.append("thread")
-        save_rotation(brand, recent)
-        log.info(f"[{brand.key}] posted thread of {len(ids)} tweets, root id={ids[0]}")
-        return entry
     except tweepy.TweepyException as e:
-        log.error(f"[{brand.key}] thread failed: {e}")
+        # Partial failure: record whatever was actually posted so the thread isn't
+        # silently orphaned on Twitter, then report failure.
+        if ids:
+            entry = {
+                "id": ids[0],
+                "category": "thread",
+                "text": tweets[0],
+                "thread_ids": ids,
+                "partial": True,
+                "expected_len": len(tweets),
+                "posted_at": datetime.now().isoformat(),
+            }
+            append_posted(brand, entry)
+            log.error(f"[{brand.key}] thread PARTIALLY posted {len(ids)}/{len(tweets)} "
+                      f"(root id={ids[0]}), then failed: {e}")
+        else:
+            log.error(f"[{brand.key}] thread failed before any tweet posted: {e}")
         return None
+
+    entry = {
+        "id": ids[0],
+        "category": "thread",
+        "text": tweets[0],
+        "thread_ids": ids,
+        "posted_at": datetime.now().isoformat(),
+    }
+    append_posted(brand, entry)
+    recent = load_rotation(brand)
+    recent.append("thread")
+    save_rotation(brand, recent)
+    log.info(f"[{brand.key}] posted thread of {len(ids)} tweets, root id={ids[0]}")
+    return entry
 
 
 # ── High-level autopost ───────────────────────────────────────────────────────

@@ -79,9 +79,13 @@ def find_candidates(brand, q: dict) -> list:
     seen = set(q["seen_ids"])
     found = []
 
-    # Build a single OR query from keywords; exclude RTs/replies; English
-    if brand.reply_keywords:
-        terms = " OR ".join(f'"{k}"' for k in brand.reply_keywords[:10])
+    # Build a single OR query from keywords; exclude RTs/replies; English.
+    # Strip embedded quotes from keywords so they can't break out of the
+    # quoted phrase and corrupt the query syntax.
+    kw = [k.replace('"', "").strip() for k in (brand.reply_keywords or [])[:10]]
+    kw = [k for k in kw if k]
+    if kw:
+        terms = " OR ".join(f'"{k}"' for k in kw)
         query = f"({terms}) -is:retweet -is:reply lang:en"
         try:
             resp = client.search_recent_tweets(
@@ -89,8 +93,10 @@ def find_candidates(brand, q: dict) -> list:
                 tweet_fields=["public_metrics", "author_id", "created_at", "lang"],
             )
             for t in (resp.data or []):
-                if str(t.id) in seen:
+                tid = str(t.id)
+                if tid in seen:
                     continue
+                seen.add(tid)  # dedup within this scan's batch too
                 m = t.public_metrics or {}
                 if m.get("like_count", 0) < MIN_LIKES:
                     continue
@@ -182,7 +188,13 @@ def scan(brand):
 
     n_new = 0
     for c in candidates:
+        # Respect the daily cap: never queue more than remaining slots.
+        if n_new >= remaining:
+            break
         reply = draft_reply(brand, c["text"])
+        # Mark every candidate seen so we don't redraft it next scan, even
+        # when the draft is dropped (empty or over the 280-char limit).
+        q["seen_ids"].append(c["id"])
         if not reply or len(reply) > 280:
             continue
         item = {
@@ -194,7 +206,6 @@ def scan(brand):
             "status": "pending",
         }
         q["pending"].append(item)
-        q["seen_ids"].append(c["id"])
         send_for_approval(brand, item)
         n_new += 1
         time.sleep(1)
@@ -241,43 +252,62 @@ def worker():
                                   "allowed_updates": ["callback_query"]})
         if not resp or not resp.get("ok"):
             time.sleep(3); continue
-        for upd in resp["result"]:
-            offset = upd["update_id"] + 1
-            cq = upd.get("callback_query")
-            if not cq:
+        result = resp.get("result")
+        if not isinstance(result, list):
+            time.sleep(3); continue
+        for upd in result:
+            # Always advance the offset first so a malformed/failed update is
+            # never re-polled into an infinite loop, and a mid-update crash
+            # can't replay the same update on restart.
+            try:
+                offset = upd["update_id"] + 1
+            except (KeyError, TypeError):
                 continue
-            data = cq.get("data", "")
-            if not (data.startswith("rok:") or data.startswith("rno:")):
-                continue
-            _, brand_key, item_id = data.split(":", 2)
-            action = "approved" if data.startswith("rok:") else "skipped"
-            brand, q, item = _find_item(brand_key, item_id)
-            if not item:
-                _tg("answerCallbackQuery", {"callback_query_id": cq["id"],
-                                            "text": "Already handled"})
-                continue
+            try:
+                cq = upd.get("callback_query")
+                if not cq or "id" not in cq:
+                    continue
+                data = cq.get("data", "")
+                if not (data.startswith("rok:") or data.startswith("rno:")):
+                    continue
+                parts = data.split(":", 2)
+                if len(parts) != 3 or not parts[1] or not parts[2]:
+                    continue
+                _, brand_key, item_id = parts
+                if brand_key not in BRANDS:
+                    continue
+                action = "approved" if data.startswith("rok:") else "skipped"
+                brand, q, item = _find_item(brand_key, item_id)
+                if not item:
+                    _tg("answerCallbackQuery", {"callback_query_id": cq["id"],
+                                                "text": "Already handled"})
+                    continue
 
-            note = "skipped"
-            if action == "approved":
-                ok = _post_reply(brand, item)
-                note = "posted ✅" if ok else "post FAILED ❌"
-                item["status"] = "approved" if ok else "failed"
-            else:
-                item["status"] = "skipped"
+                note = "skipped"
+                if action == "approved":
+                    ok = _post_reply(brand, item)
+                    note = "posted ✅" if ok else "post FAILED ❌"
+                    item["status"] = "approved" if ok else "failed"
+                else:
+                    item["status"] = "skipped"
 
-            q["pending"] = [p for p in q["pending"] if p["id"] != item_id]
-            q["history"].append({"id": item_id, "status": item["status"],
-                                 "at": datetime.now().isoformat()})
-            save_queue(brand, q)
-            _tg("answerCallbackQuery", {"callback_query_id": cq["id"], "text": note})
-            # edit the message to show resolution
-            msg = cq.get("message", {})
-            if msg:
-                _tg("editMessageText", {
-                    "chat_id": msg["chat"]["id"], "message_id": msg["message_id"],
-                    "text": msg.get("text", "") + f"\n\n— {note}",
-                    "disable_web_page_preview": True,
-                })
+                q["pending"] = [p for p in q["pending"] if p["id"] != item_id]
+                q["history"].append({"id": item_id, "status": item["status"],
+                                     "at": datetime.now().isoformat()})
+                save_queue(brand, q)
+                _tg("answerCallbackQuery", {"callback_query_id": cq["id"], "text": note})
+                # edit the message to show resolution
+                msg = cq.get("message", {})
+                if msg and "chat" in msg and "message_id" in msg:
+                    _tg("editMessageText", {
+                        "chat_id": msg["chat"]["id"], "message_id": msg["message_id"],
+                        "text": msg.get("text", "") + f"\n\n— {note}",
+                        "disable_web_page_preview": True,
+                    })
+            except Exception as e:
+                # Never let one bad update kill the long-poll worker.
+                log.error(f"worker: failed to process update {upd.get('update_id')}: {e}")
+                continue
 
 
 def show_queue(brand):

@@ -28,9 +28,17 @@ def _font(path, size):
         return ImageFont.load_default()
 
 
-def _hex(c):
-    c = c.lstrip("#")
-    return tuple(int(c[i:i+2], 16) for i in (0, 2, 4))
+def _hex(c, fallback=(0, 0, 0)):
+    """Parse a #RRGGBB or #RGB hex color. Falls back gracefully on bad input."""
+    try:
+        c = str(c).strip().lstrip("#")
+        if len(c) == 3:  # shorthand #RGB -> #RRGGBB
+            c = "".join(ch * 2 for ch in c)
+        if len(c) < 6:
+            return fallback
+        return tuple(int(c[i:i+2], 16) for i in (0, 2, 4))
+    except (ValueError, TypeError):
+        return fallback
 
 
 def _strip_url(text: str, url: str) -> str:
@@ -40,33 +48,60 @@ def _strip_url(text: str, url: str) -> str:
     return t.strip(" .,\n")
 
 
+def _wrap(draw, text, font, max_w):
+    """Wrap text to roughly fit max_w, always breaking over-long unbroken words."""
+    # estimate chars per line from average glyph width
+    avg = draw.textlength("x" * 20, font=font) / 20
+    chars_per_line = max(8, int(max_w / max(avg, 1)))
+    return textwrap.fill(
+        text, width=chars_per_line,
+        break_long_words=True, break_on_hyphens=True,
+    )
+
+
+def _truncate_to_height(draw, text, font, max_w, max_h, spacing):
+    """Drop trailing lines (with an ellipsis) until the block fits max_h."""
+    lines = text.split("\n")
+    while lines:
+        candidate = "\n".join(lines)
+        bbox = draw.multiline_textbbox((0, 0), candidate, font=font, spacing=spacing)
+        if (bbox[3] - bbox[1]) <= max_h:
+            return candidate
+        lines.pop()
+        if lines:
+            lines[-1] = lines[-1].rstrip() + "…"
+    return ""
+
+
 def _fit_text(draw, text, font_path, max_w, max_h, start_size=72, min_size=34):
-    """Find the largest font size + wrapping that fits the text box."""
+    """Find the largest font size + wrapping that fits the text box.
+    Guarantees the returned text never overflows max_h (truncates if needed)."""
+    text = (text or "").strip()
+    if not text:
+        text = " "
     size = start_size
     while size >= min_size:
         font = _font(font_path, size)
-        # estimate chars per line from average glyph width
-        avg = draw.textlength("x" * 20, font=font) / 20
-        chars_per_line = max(10, int(max_w / max(avg, 1)))
-        wrapped = textwrap.fill(text, width=chars_per_line)
+        wrapped = _wrap(draw, text, font, max_w)
         bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=14)
         h = bbox[3] - bbox[1]
         w = bbox[2] - bbox[0]
         if h <= max_h and w <= max_w:
             return font, wrapped
         size -= 4
+    # Even at min size it doesn't fit — wrap at min size and hard-truncate height.
     font = _font(font_path, min_size)
-    avg = draw.textlength("x" * 20, font=font) / 20
-    chars_per_line = max(10, int(max_w / max(avg, 1)))
-    return font, textwrap.fill(text, width=chars_per_line)
+    wrapped = _wrap(draw, text, font, max_w)
+    wrapped = _truncate_to_height(draw, wrapped, font, max_w, max_h, spacing=14)
+    return font, wrapped
 
 
 def make_card(brand, tweet_text: str) -> str:
     """Render a branded quote card for `tweet_text`. Returns the PNG path."""
     theme = brand.theme or {}
-    bg     = _hex(theme.get("bg", "#0A0E14"))
-    fg     = _hex(theme.get("fg", "#FFFFFF"))
-    accent = _hex(theme.get("accent", "#F5C518"))
+    bg     = _hex(theme.get("bg", "#0A0E14"), fallback=(10, 14, 20))
+    fg     = _hex(theme.get("fg", "#FFFFFF"), fallback=(255, 255, 255))
+    accent = _hex(theme.get("accent", "#F5C518"), fallback=(245, 197, 24))
     label  = theme.get("label", brand.name.upper())
     footer = theme.get("footer", brand.url)
 
@@ -81,7 +116,10 @@ def make_card(brand, tweet_text: str) -> str:
     draw.text((MARGIN, MARGIN + 30), label, font=label_font, fill=accent)
 
     # Body text — fit into the central area
-    body = _strip_url(tweet_text, brand.url)
+    body = _strip_url(tweet_text or "", brand.url)
+    if not body:
+        # Nothing left after stripping the URL — show the brand name rather than a blank card.
+        body = brand.name
     box_top = MARGIN + 110
     box_h = CARD_H - box_top - 150
     body_font, wrapped = _fit_text(
