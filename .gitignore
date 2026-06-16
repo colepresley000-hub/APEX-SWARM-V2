@@ -13,3 +13,7 @@ twitter_drafts/
 twitter_rotation.json
 venv/
 *.save
+
+# social bot runtime state
+social_data/
+*_drafts/
