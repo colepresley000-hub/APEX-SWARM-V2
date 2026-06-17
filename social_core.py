@@ -384,6 +384,38 @@ def generate_thread(brand: BrandConfig, topic_brief: str, n_tweets: int = 5) -> 
     return tweets
 
 
+# ── Credit / billing alerts ───────────────────────────────────────────────────
+_CREDIT_ALERT_FILE = DATA_DIR / "_credit_alert.json"
+_CREDIT_ALERT_COOLDOWN = 6 * 3600  # ping at most once per 6h
+
+def is_credit_error(exc) -> bool:
+    """True if a Tweepy exception is an X API 402 / no-credits / billing error."""
+    s = str(exc).lower()
+    return ("402" in s or "payment required" in s
+            or "does not have any credits" in s or "not have any credits" in s)
+
+def notify_credits_empty(brand: BrandConfig, context: str = ""):
+    """Ping Telegram that X credits are exhausted — deduped to once per cooldown."""
+    import time as _t
+    now = _t.time()
+    try:
+        last = json.loads(_CREDIT_ALERT_FILE.read_text()).get("at", 0)
+    except Exception:
+        last = 0
+    if now - last < _CREDIT_ALERT_COOLDOWN:
+        return  # already alerted recently
+    msg = (f"⚠️ <b>X API credits empty</b> — posting paused for {brand.name}.\n"
+           f"All tweets/replies will fail (402 Payment Required) until you add "
+           f"credits at console.x.com → Buy Credits.")
+    if context:
+        msg += f"\n\n<i>{context}</i>"
+    telegram_send(msg)
+    try:
+        _atomic_write(_CREDIT_ALERT_FILE, json.dumps({"at": now}))
+    except Exception:
+        pass
+
+
 # ── Posting ───────────────────────────────────────────────────────────────────
 def _save_draft(brand: BrandConfig, text: str, tag: str) -> Path:
     brand.drafts_dir.mkdir(exist_ok=True)
@@ -433,6 +465,8 @@ def post_tweet(brand: BrandConfig, text: str, category_name: str,
         return None
     except tweepy.TweepyException as e:
         log.error(f"[{brand.key}] post failed: {e}")
+        if is_credit_error(e):
+            notify_credits_empty(brand, "Scheduled tweet could not post.")
         return None
 
 def post_thread(brand: BrandConfig, tweets: list) -> Optional[dict]:
@@ -474,6 +508,8 @@ def post_thread(brand: BrandConfig, tweets: list) -> Optional[dict]:
                       f"(root id={ids[0]}), then failed: {e}")
         else:
             log.error(f"[{brand.key}] thread failed before any tweet posted: {e}")
+        if is_credit_error(e):
+            notify_credits_empty(brand, "Thread could not post.")
         return None
 
     entry = {

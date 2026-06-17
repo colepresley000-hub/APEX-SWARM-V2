@@ -236,6 +236,8 @@ def _post_reply(brand, item) -> bool:
         return True
     except tweepy.TweepyException as e:
         log.error(f"[{brand.key}] reply post failed: {e}")
+        if sc.is_credit_error(e):
+            sc.notify_credits_empty(brand, "Approved reply could not post.")
         return False
 
 def _find_item(brand_key, item_id):
