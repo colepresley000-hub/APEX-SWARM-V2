@@ -41,7 +41,8 @@ log = logging.getLogger("reply_engine")
 
 import os
 
-MIN_LIKES = 2          # ignore zero-engagement noise
+MIN_LIKES = 0          # recent-search returns fresh tweets (~0 likes); replying
+                       # early is the play. Human approval is the quality gate.
 MAX_CANDIDATES = 8     # per scan, per brand
 TG_API = "https://api.telegram.org/bot{token}/{method}"
 
