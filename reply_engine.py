@@ -112,6 +112,10 @@ def find_candidates(brand, q: dict) -> list:
                   f"Reply posting still works; only auto-discovery is gated.")
         except tweepy.TweepyException as e:
             log.warning(f"[{brand.key}] search failed: {e}")
+        except Exception as e:
+            # Raw network errors (ConnectionReset, DNS, timeouts) are NOT
+            # TweepyExceptions and would otherwise crash the scan.
+            log.warning(f"[{brand.key}] search network error: {e}")
 
     return found[:MAX_CANDIDATES]
 
@@ -191,24 +195,29 @@ def scan(brand):
         # Respect the daily cap: never queue more than remaining slots.
         if n_new >= remaining:
             break
-        reply = draft_reply(brand, c["text"])
-        # Mark every candidate seen so we don't redraft it next scan, even
-        # when the draft is dropped (empty or over the 280-char limit).
+        # Mark every candidate seen first so a network failure mid-draft
+        # doesn't cause us to retry the same tweet next scan.
         q["seen_ids"].append(c["id"])
-        if not reply or len(reply) > 280:
+        try:
+            reply = draft_reply(brand, c["text"])
+            if not reply or len(reply) > 280:
+                continue
+            item = {
+                "id": f"{brand.key}_{c['id']}",
+                "tweet_id": c["id"],
+                "candidate_text": c["text"],
+                "reply_text": reply,
+                "queued_at": datetime.now().isoformat(),
+                "status": "pending",
+            }
+            q["pending"].append(item)
+            send_for_approval(brand, item)
+            n_new += 1
+            time.sleep(1)
+        except Exception as e:
+            # One bad candidate (network/API blip) must not abort the scan.
+            log.warning(f"[{brand.key}] candidate {c['id']} failed: {e}")
             continue
-        item = {
-            "id": f"{brand.key}_{c['id']}",
-            "tweet_id": c["id"],
-            "candidate_text": c["text"],
-            "reply_text": reply,
-            "queued_at": datetime.now().isoformat(),
-            "status": "pending",
-        }
-        q["pending"].append(item)
-        send_for_approval(brand, item)
-        n_new += 1
-        time.sleep(1)
 
     save_queue(brand, q)
     print(f"[{brand.key}] queued {n_new} draft replies → check Telegram to approve")
