@@ -225,20 +225,41 @@ def scan(brand):
 
 
 # ── Approval worker (long-poll Telegram) ──────────────────────────────────────
-def _post_reply(brand, item) -> bool:
+STALE_HOURS = 24  # drafts older than this target tweets likely gone/changed
+
+def _is_stale(item) -> bool:
+    ts = item.get("queued_at", "")
+    if not ts:
+        return False
+    try:
+        age = datetime.now() - datetime.fromisoformat(ts)
+        return age.total_seconds() > STALE_HOURS * 3600
+    except Exception:
+        return False
+
+def _post_reply(brand, item):
+    """Returns (ok: bool, note: str). note is a human-friendly result."""
+    if _is_stale(item):
+        return False, "skipped — draft too old, target tweet likely gone (run a fresh scan)"
     if brand.draft_mode:
         log.info(f"[{brand.key}] DRAFT MODE — would reply: {item['reply_text']}")
-        return True
+        return True, "posted ✅ (draft mode)"
     client = sc.v2_client(brand)
     try:
-        client.create_tweet(text=item["reply_text"],
-                            in_reply_to_tweet_id=item["tweet_id"])
-        return True
+        resp = client.create_tweet(text=item["reply_text"],
+                                   in_reply_to_tweet_id=item["tweet_id"])
+        if not resp or not resp.data or not resp.data.get("id"):
+            return False, "post FAILED ❌ (no tweet id returned)"
+        return True, "posted ✅"
+    except tweepy.errors.Forbidden as e:
+        log.error(f"[{brand.key}] reply post forbidden: {e}")
+        return False, "post FAILED ❌ — target tweet deleted, protected, or you're blocked"
     except tweepy.TweepyException as e:
         log.error(f"[{brand.key}] reply post failed: {e}")
         if sc.is_credit_error(e):
             sc.notify_credits_empty(brand, "Approved reply could not post.")
-        return False
+            return False, "post FAILED ❌ — X API credits empty"
+        return False, f"post FAILED ❌ — {str(e)[:80]}"
 
 def _find_item(brand_key, item_id):
     brand = BRANDS[brand_key]
@@ -297,8 +318,7 @@ def worker():
 
                 note = "skipped"
                 if action == "approved":
-                    ok = _post_reply(brand, item)
-                    note = "posted ✅" if ok else "post FAILED ❌"
+                    ok, note = _post_reply(brand, item)
                     item["status"] = "approved" if ok else "failed"
                 else:
                     item["status"] = "skipped"
