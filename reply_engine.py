@@ -91,13 +91,20 @@ def find_candidates(brand, q: dict) -> list:
         try:
             resp = client.search_recent_tweets(
                 query=query, max_results=20,
-                tweet_fields=["public_metrics", "author_id", "created_at", "lang"],
+                tweet_fields=["public_metrics", "author_id", "created_at",
+                              "lang", "reply_settings"],
             )
             for t in (resp.data or []):
                 tid = str(t.id)
                 if tid in seen:
                     continue
                 seen.add(tid)  # dedup within this scan's batch too
+                # Only queue tweets ANYONE can reply to. "following" /
+                # "mentionedUsers" / "subscribers" settings make the API 403
+                # the reply ("not allowed because you have not been mentioned").
+                rs = getattr(t, "reply_settings", None)
+                if rs and rs != "everyone":
+                    continue
                 m = t.public_metrics or {}
                 if m.get("like_count", 0) < MIN_LIKES:
                     continue
@@ -253,6 +260,10 @@ def _post_reply(brand, item):
         return True, "posted ✅"
     except tweepy.errors.Forbidden as e:
         log.error(f"[{brand.key}] reply post forbidden: {e}")
+        body = e.response.text if getattr(e, "response", None) is not None else str(e)
+        if "not been mentioned" in body or "not allowed" in body:
+            return False, ("skipped — author restricted who can reply to this tweet "
+                           "(can't be helped; next scan only queues open tweets)")
         return False, "post FAILED ❌ — target tweet deleted, protected, or you're blocked"
     except tweepy.TweepyException as e:
         log.error(f"[{brand.key}] reply post failed: {e}")
