@@ -43,6 +43,9 @@ import os
 
 MIN_LIKES = 0          # recent-search returns fresh tweets (~0 likes); replying
                        # early is the play. Human approval is the quality gate.
+# "network" = reply only to accounts you follow (works without X Premium).
+# "search"  = reply to strangers matching keywords (needs X Premium, else 403).
+REPLY_MODE = os.getenv("REPLY_MODE", "network").lower()
 MAX_CANDIDATES = 8     # per scan, per brand
 TG_API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -72,6 +75,87 @@ def _approved_today(q: dict) -> int:
     today = date.today().isoformat()
     return sum(1 for h in q["history"]
                if h.get("status") == "approved" and h.get("at", "").startswith(today))
+
+
+# ── Network mode: reply only to accounts you follow (no Premium needed) ────────
+# X blocks non-Premium accounts from replying to strangers. Replying to people
+# you follow is allowed, so we discover candidates from your own follow graph.
+FOLLOWS_CACHE = sc.DATA_DIR / "{key}_follows.json"
+FOLLOWS_TTL = 24 * 3600
+NETWORK_CHUNK = 15  # how many follows to query per scan (query-length safe)
+
+def _load_follows(brand) -> list:
+    """Cached list of {id, username} the brand account follows. Refresh daily."""
+    import time as _t
+    cache = sc.DATA_DIR / f"{brand.key}_follows.json"
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text())
+            if _t.time() - data.get("at", 0) < FOLLOWS_TTL and data.get("follows"):
+                return data["follows"]
+        except Exception:
+            pass
+    client = sc.v2_client(brand)
+    follows = []
+    try:
+        me = client.get_me().data
+        token = None
+        for _ in range(5):  # up to ~500 follows
+            resp = client.get_users_following(id=me.id, max_results=100,
+                                              pagination_token=token)
+            for u in (resp.data or []):
+                follows.append({"id": str(u.id), "username": u.username})
+            token = (resp.meta or {}).get("next_token")
+            if not token:
+                break
+    except Exception as e:
+        log.warning(f"[{brand.key}] follows lookup failed: {e}")
+        return []
+    try:
+        sc._atomic_write(cache, json.dumps({"at": _t.time(), "follows": follows}))
+    except Exception:
+        pass
+    return follows
+
+def find_candidates_network(brand, q: dict) -> list:
+    """Recent tweets from a rotating slice of accounts the brand follows."""
+    follows = _load_follows(brand)
+    if not follows:
+        print(f"[{brand.key}] no follows found for network mode")
+        return []
+    # Rotate through the follow list across scans so we cover everyone over time.
+    offset = q.get("net_offset", 0) % len(follows)
+    chunk = follows[offset:offset + NETWORK_CHUNK]
+    if len(chunk) < NETWORK_CHUNK:  # wrap around
+        chunk += follows[:NETWORK_CHUNK - len(chunk)]
+    q["net_offset"] = (offset + NETWORK_CHUNK) % len(follows)
+
+    client = sc.v2_client(brand)
+    seen = set(q["seen_ids"])
+    found = []
+    from_q = " OR ".join(f"from:{u['username']}" for u in chunk)
+    query = f"({from_q}) -is:retweet -is:reply lang:en"
+    try:
+        resp = client.search_recent_tweets(
+            query=query, max_results=30,
+            tweet_fields=["public_metrics", "author_id", "created_at", "reply_settings"],
+        )
+        for t in (resp.data or []):
+            tid = str(t.id)
+            if tid in seen:
+                continue
+            seen.add(tid)
+            rs = getattr(t, "reply_settings", None)
+            if rs and rs != "everyone":
+                continue
+            found.append({"id": tid, "text": t.text,
+                          "author_id": str(t.author_id),
+                          "metrics": t.public_metrics or {}})
+    except tweepy.TweepyException as e:
+        log.warning(f"[{brand.key}] network search failed: {e}")
+    except Exception as e:
+        log.warning(f"[{brand.key}] network search error: {e}")
+    return found[:MAX_CANDIDATES]
 
 
 # ── Candidate search ──────────────────────────────────────────────────────────
@@ -130,6 +214,7 @@ def find_candidates(brand, q: dict) -> list:
 
 # ── Reply drafting ────────────────────────────────────────────────────────────
 def draft_reply(brand, tweet_text: str) -> str:
+    """Draft a reply, or return "" if the tweet isn't relevant enough to engage."""
     client = sc.anthropic_client()
     msg = client.messages.create(
         model=sc.CLAUDE_MODEL,
@@ -140,11 +225,17 @@ def draft_reply(brand, tweet_text: str) -> str:
                 {"type": "text", "text": brand.product_context}],
         messages=[{"role": "user", "content": (
             f"Someone tweeted:\n\"{tweet_text}\"\n\n"
-            "Write a single reply that adds genuine value and feels human. "
-            "Follow the REPLY MODE rules exactly. Output only the reply text."
+            "If this tweet is NOT a natural fit for you to add value to (off-topic, "
+            "personal, or you'd have nothing genuinely useful to say), reply with "
+            "exactly: SKIP\n\n"
+            "Otherwise write a single reply that adds genuine value and feels human. "
+            "Follow the REPLY MODE rules exactly. Output only the reply text or SKIP."
         )}],
     )
-    return sc.clean_text(msg.content[0].text)
+    out = sc.clean_text(msg.content[0].text)
+    if out.strip().upper().startswith("SKIP") or len(out.strip()) < 5:
+        return ""
+    return out
 
 
 # ── Telegram approval ─────────────────────────────────────────────────────────
@@ -193,9 +284,15 @@ def scan(brand):
         print(f"[{brand.key}] daily cap ({brand.reply_daily_cap}) reached")
         return
 
-    candidates = find_candidates(brand, q)
+    # Network mode (default): reply only to accounts you follow — works without
+    # X Premium. Set REPLY_MODE=search in .env to target strangers (needs Premium).
+    if REPLY_MODE == "search":
+        candidates = find_candidates(brand, q)
+    else:
+        candidates = find_candidates_network(brand, q)
     if not candidates:
         print(f"[{brand.key}] no new candidates this scan")
+        save_queue(brand, q)  # persist net_offset rotation even when empty
         return
 
     n_new = 0
