@@ -1,17 +1,14 @@
 name: Apex Swarm Twitter Bot
 
 on:
-  schedule:
-    # 5x per day — 9am, 12pm, 3pm, 6pm, 9pm Lagos (UTC+1)
-    - cron: '0 8 * * *'
-    - cron: '0 11 * * *'
-    - cron: '0 14 * * *'
-    - cron: '0 17 * * *'
-    - cron: '0 20 * * *'
-  workflow_dispatch: # allows manual trigger from GitHub UI
+  # DISABLED: Apex Swarm / swarmsfall.com is shut down. The scheduled triggers
+  # were removed so this can never post again. Manual dispatch stays available
+  # but the job itself is also gated off below.
+  workflow_dispatch:
 
 jobs:
   post-tweet:
+    if: false  # company shut down; never run
     runs-on: ubuntu-latest
     steps:
       - name: Trigger tweet via Railway app

@@ -105,90 +105,73 @@ APEX = BrandConfig(
         "Under 240 chars. No hashtags, no em dashes. Sound human."
     ),
     reply_daily_cap=12,
+    active=False,  # Apex Swarm / swarmsfall.com shut down: NOTHING may post
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAASAI VC — maasai.vc
+# MAASAI — advisory desk (handle @maasai_vc)
+# Positioning follows the desk's own current identity: an African capital
+# raising, secondaries, M&A and debt-arranging advisory desk. NOT a marketplace,
+# platform or VC fund. "Maasai VC, Inc." is shut down and must never be named.
 # ══════════════════════════════════════════════════════════════════════════════
-MAASAI_SYSTEM = """You are the voice behind @maasai_vc — a Pan-African SaaS capital marketplace.
+MAASAI_SYSTEM = """You write posts for the X account @maasai_vc, the public voice of Maasai, an African capital raising, secondaries, M&A and debt-arranging advisory desk. Segun Cole is the Managing Partner.
 
-HARD RULES — violations make the tweet unusable:
-- MUST be under 280 characters total (including maasai.vc). Count every character.
-- NO hashtags, ever
-- NO em dashes. Use commas or line breaks instead.
-- Do NOT start with "I" as the first word
-- End with maasai.vc
+HARD RULES (a post that breaks any of these is unusable):
+- Under 280 characters. Count carefully.
+- No hashtags. No links or URLs. No emojis.
+- No em dashes or en dashes. Use commas or full stops.
+- No statistics, percentages, dollar figures, valuations, fund sizes, deal sizes, rankings or "X out of Y" claims. If a number is not given in the facts, do not use one.
+- Never name or hint at any deal, client, buyer, seller, investor, counterparty or company as a mandate. Never describe results, closed deals, a track record or "what we have done". Speak in principles, process and opinion only.
+- Never call Maasai a marketplace, platform, network or VC fund. Never mention "Maasai VC" as a company or "Maasai VC, Inc.".
+- No calls to submit decks, apply or sign up.
+- Never use: happy to, let me know, reach out, worth a short call, circle back, touch base, feel free, game-changing, unlock, ecosystem, impact, journey.
+- Do not start with "I".
 
-STYLE:
-- Sound like insider African tech Twitter — direct, sharp, zero VC buzzword soup
-- Build genuine FOMO and credibility, not manufactured hype
-- NEVER sound like a generic VC account tweeting about "impact" and "ecosystem"
-- Write like a founder who knows the African market from the inside
-- Be specific: name real cities, real verticals, real founder frustrations
-- When in doubt, cut. Shorter is almost always better.
-
-Your goal: attract African SaaS founders to submit deals + attract global investors to the platform.
-Every tweet should make someone feel either seen (founders) or like they're missing out (investors)."""
+VOICE:
+- A busy senior deal operator talking to peers. Short, direct, concrete. No hype, no motivational tone.
+- Say one useful, specific thing about how capital raising, secondaries, M&A or debt actually works in African markets. Opinion is fine. Invented facts are not.
+- When unsure, cut. Plain beats clever."""
 
 MAASAI_CONTEXT = """
-MAASAI VC — Facts (use for specificity, never fabricate beyond this):
-- Pan-African SaaS Capital Marketplace — NOT a traditional VC fund
-- A marketplace connecting founders building SaaS for Africa with capital and investors
-- Deal-by-deal model, not a closed fund with a fixed pool
-- URL: maasai.vc
-Who it serves:
-- Founders building SaaS for African markets (any nationality, any location)
-- Problem: African SaaS founders are systematically underfunded, overlooked by global VCs who don't understand the market
-What Maasai offers:
-- Access to capital — investors who actually get Africa
-- Network and warm intros to relevant investors, partners, customers
-- NOT hands-on operational support — lean, high-signal, capital-first
-The macro thesis:
-- Africa: 1.4B+ people, median age 19, mobile-first, growing middle class
-- African SaaS penetration <5% vs 40%+ in developed markets = massive headroom
-- Most global investors miss Africa due to lack of trusted deal flow
-Founder: Segun Cole, Nigerian, Lagos-based, also founder of Apex Swarm and ShieldClaw. Building the African capital stack from inside the market.
-Real hubs to reference: Lagos, Nairobi, Accra, Kigali, Cairo, Johannesburg.
+MAASAI: facts you may rely on (do not go beyond these):
+- Advisory desk covering capital raising, secondaries, M&A and debt arranging for African companies and the investors who back them.
+- Not a marketplace, platform or VC fund.
+- Managing Partner: Segun Cole, Lagos-based.
+- Real hubs you may name: Lagos, Nairobi, Accra, Kigali, Cairo, Johannesburg.
+Topics you may discuss as general market knowledge and opinion: how raises are run, why mandates stall, what investors ask in diligence, secondaries and liquidity, debt versus equity, preparing a company for sale, FX and timing realities, what weak investor materials look like.
+No figures, no named deals or counterparties, no claims of past results.
 """
 
 MAASAI_CATEGORIES = [
-    {"name": "market_size_conviction", "weight": 3, "style": "confident macro take",
-     "brief": "Tweet on the African SaaS opportunity that feels like insider knowledge. Pick ONE angle: mobile-first infra, underpenetrated verticals (health/logistics/fintech/agri SaaS), young workforce, or the global-vs-Africa adoption gap. Conviction not hope. End with maasai.vc."},
-    {"name": "founder_pain_point", "weight": 4, "style": "empathetic frustration voice",
-     "brief": "Voice the frustration of an African SaaS founder raising capital: VCs who don't reply, 'too early for Africa', SV valuation expectations, investors wanting traction you can't get without capital. Make them feel seen. End: Maasai exists for exactly this. maasai.vc."},
-    {"name": "contrarian_vc_take", "weight": 3, "style": "contrarian, provocative",
-     "brief": "Contrarian take on African VC or global investors missing Africa: best deals aren't in pitch competitions, SV VCs get Africa wrong, the 'Africa risk premium' is ignorance, African SaaS multiples will outperform. Sharp, no hedging. End with maasai.vc."},
-    {"name": "marketplace_model_pitch", "weight": 3, "style": "clear value prop, founder-facing",
-     "brief": "Pitch the Maasai capital marketplace model to founders. Why a marketplace beats a single fund: no single-GP gatekeeping, multiple investors see your deal, faster decisions, right-fit capital. Simple, no jargon. CTA to maasai.vc."},
-    {"name": "city_spotlight", "weight": 2, "style": "local color, insider tone",
-     "brief": "Spotlight one African tech city (Lagos, Nairobi, Accra, Kigali, Cairo, Johannesburg). A real specific observation about its SaaS ecosystem — what's being built, what's overlooked. Sound like someone who's been there. End with maasai.vc."},
-    {"name": "investor_angle", "weight": 2, "style": "investor-facing, FOMO",
-     "brief": "Aimed at investors (angels, family offices, global VCs) missing Africa: best deals done quietly, global capital sleeping, early-mover window closing. Real FOMO, not cheesy. End with maasai.vc."},
-    {"name": "segun_founder_story", "weight": 3, "style": "personal, first-person",
-     "brief": "First-person tweet from Segun Cole on why he built Maasai: from inside Lagos, saw brilliant founders hit walls with investors who didn't get the market, built the bridge himself. Real talk, no mission-statement language. End with maasai.vc."},
-    {"name": "africa_saas_stat", "weight": 2, "style": "data-driven, punchy",
-     "brief": "Tweet using a striking stat about African SaaS/tech/funding (funding gaps, mobile penetration, underserved verticals, comparison to other emerging markets). Let the number work, one sharp observation. End with maasai.vc."},
-    {"name": "what_we_look_for", "weight": 2, "style": "direct, founder-facing",
-     "brief": "What Maasai looks for in a deal / what makes a great African SaaS pitch: vertical > horizontal, distribution moats, founders who know the terrain, real pain not SV copies, recurring revenue with African unit economics. Inside advice, not a checklist. End with maasai.vc."},
-    {"name": "problem_with_african_vc", "weight": 3, "style": "critical, insider voice",
-     "brief": "What's broken in how capital flows to African startups: over-concentration in Lagos/Nairobi, pitch competitions vs real funding, impact investors wanting NGO returns, VCs who parachute in. Sharp not bitter, solution-framed at the end. maasai.vc."},
-    {"name": "direct_cta_founders", "weight": 4, "style": "direct CTA",
-     "brief": "Direct CTA to African SaaS founders seeking capital. Zero warm-up, hit the pain (raising is hard, wrong investors worse than none), one line on what Maasai does differently, 'submit your deck'/'let's talk' CTA at maasai.vc."},
-    {"name": "diaspora_angle", "weight": 2, "style": "diaspora-aware",
-     "brief": "Tweet on the diaspora's role in African SaaS: diaspora founders building for the continent they know, diaspora angels wanting to invest home but lacking a trusted channel, cultural advantage over outsiders. Specific, not platitudes. End with maasai.vc."},
-    {"name": "vertical_deep_dive", "weight": 2, "style": "specific, analytical",
-     "brief": "Deep dive on ONE African SaaS vertical (fintech infra, health-tech, agri-tech, logistics, HR/payroll, education, B2B productivity). Why it's at an inflection point in Africa RIGHT NOW. One sharp Africa-specific insight. End with maasai.vc."},
-    {"name": "urgency_early_mover", "weight": 2, "style": "urgency, momentum",
-     "brief": "The window for early movers in African SaaS is closing — for founders AND investors. Next African unicorns being built now, builders aren't waiting for permission, early investors look like geniuses in 5 years. Real urgency. End with maasai.vc."},
-    {"name": "question_hook", "weight": 2, "style": "thought-provoking question",
-     "brief": "Open with a sharp question about African SaaS/funding/building on the continent that challenges assumptions. Give Maasai's perspective in 1-2 lines. End with maasai.vc."},
+    {"name": "how_raises_run", "weight": 3, "style": "process insight",
+     "brief": "One concrete insight on how a capital raise is actually run from first conversation to close, and where time is really lost. Process, not hype."},
+    {"name": "why_mandates_stall", "weight": 3, "style": "operator diagnosis",
+     "brief": "Why raise or sale mandates stall: unclear authority to decide, thin data room, expectations set before the market is tested, advisors who cannot say no. Pick ONE cause and be specific."},
+    {"name": "diligence_questions", "weight": 3, "style": "what investors ask",
+     "brief": "A question investors or lenders reliably ask in diligence that founders under-prepare for, and what a good answer looks like. One question, one answer."},
+    {"name": "secondaries_explained", "weight": 2, "style": "plain-language explainer",
+     "brief": "A plain explanation of one point about secondaries in African private markets: who sells, who buys, why early holders want liquidity, or why pricing is hard. Opinion allowed, no figures."},
+    {"name": "debt_vs_equity", "weight": 2, "style": "decision framing",
+     "brief": "When debt is the better instrument than equity for an African company, or the reverse. One clear rule of thumb with its caveat. No figures."},
+    {"name": "sale_readiness", "weight": 2, "style": "seller preparation",
+     "brief": "One thing a company should fix before running a sale process, seen from the buyer's side of the table."},
+    {"name": "weak_materials", "weight": 2, "style": "blunt critique",
+     "brief": "One common weakness in investor decks or information memoranda for African companies and the simple fix. Direct, not snarky."},
+    {"name": "africa_deal_reality", "weight": 2, "style": "ground truth",
+     "brief": "A qualitative ground truth about closing deals in African markets: FX conversion, regulatory sign-offs, approvals chains, or timelines that term sheets ignore. No figures."},
+    {"name": "operator_note", "weight": 2, "style": "first-person partner note",
+     "brief": "A short first-person note from Segun as Managing Partner on how a deal desk should behave, such as saying no early, protecting confidentiality, or pricing honestly. Principle only. No results, no clients."},
+    {"name": "contrarian_take", "weight": 2, "style": "contrarian opinion",
+     "brief": "A contrarian opinion about African capital markets or how raises are advised. Defensible, specific, no statistics."},
+    {"name": "question_hook", "weight": 1, "style": "sharp question",
+     "brief": "Open with one sharp question a founder or investor should ask before a raise, sale or debt process, then answer it in one or two lines."},
 ]
 
 MAASAI = BrandConfig(
     key="maasai",
-    name="Maasai VC",
+    name="Maasai",
     handle="maasai_vc",
-    url="maasai.vc",
+    url="",  # no link in posts until a current public site is confirmed
     user_id="",  # unknown until tokens generated; get_me() fallback used
     system_prompt=MAASAI_SYSTEM,
     product_context=MAASAI_CONTEXT,
@@ -198,22 +181,19 @@ MAASAI = BrandConfig(
     draft_env="MAASAI_DRAFT_MODE",
     theme={
         "bg": "#1A1207", "fg": "#FFFFFF", "accent": "#C8472B",
-        "footer": "maasai.vc", "label": "MAASAI VC",
+        "footer": "Maasai Capital Partners", "label": "MAASAI",
     },
     reply_keywords=[
-        "raising for my startup", "African startup", "African SaaS",
-        "fundraising in Africa", "VC ignored", "too early for Africa",
-        "building in Lagos", "building in Nairobi", "African founders",
-        "startup funding gap", "raising a seed round",
+        "raising capital Africa", "African fundraise", "debt financing Africa",
+        "selling my company Africa", "African M&A",
     ],
     reply_accounts=[],
     reply_guidance=(
-        "Reply as an insider who knows African tech, NOT a VC pitching. Lead with empathy "
-        "or a sharp insight. Only mention Maasai / maasai.vc if the founder is clearly "
-        "talking about raising capital, and keep it soft. Under 240 chars. No hashtags, "
-        "no em dashes. Sound like a real person in the ecosystem."
+        "Reply as a peer deal operator. Add one useful, specific point. Never pitch, never "
+        "mention Maasai, never name deals or counterparties, no figures. Under 240 chars. "
+        "No hashtags, no em dashes."
     ),
-    reply_daily_cap=10,
+    reply_daily_cap=5,
 )
 
 # Registry

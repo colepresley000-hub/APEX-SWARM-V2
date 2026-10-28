@@ -4,8 +4,6 @@ Renders tweet text onto a 1600x900 branded PNG for higher engagement.
 Used by social_core.autopost(..., with_visual=True).
 """
 
-import os
-import textwrap
 from pathlib import Path
 from datetime import datetime
 

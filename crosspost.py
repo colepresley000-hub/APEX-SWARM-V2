@@ -55,7 +55,7 @@ class XChannel(Channel):
         if len(idea) <= 280:
             return idea
         shortened = sc._shorten(brand, idea)
-        return shortened if len(shortened) <= 280 else shortened[:280]
+        return shortened if len(shortened) <= 280 else sc.truncate_keep_url(shortened, brand.url)
     def post(self, brand, text, media_path=None):
         return sc.post_tweet(brand, text, "crosspost", media_path=media_path)
 

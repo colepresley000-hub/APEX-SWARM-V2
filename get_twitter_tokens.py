@@ -8,10 +8,11 @@ OAuth 1.0a PIN-based token generator — two-step.
 import os
 import sys
 import json
+from pathlib import Path
 from dotenv import load_dotenv
 import tweepy
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 API_KEY    = os.getenv("TWITTER_API_KEY")
 API_SECRET = os.getenv("TWITTER_API_SECRET")
@@ -35,7 +36,12 @@ if len(sys.argv) == 2:
         "oauth_token":        state["oauth_token"],
         "oauth_token_secret": state["oauth_token_secret"],
     }
-    access_token, access_token_secret = handler.get_access_token(pin)
+    try:
+        access_token, access_token_secret = handler.get_access_token(pin)
+    except tweepy.TweepyException as e:
+        print(f"ERROR: PIN rejected ({e}). The request token may have expired "
+              f"or the PIN is wrong; run without args for a fresh URL.")
+        sys.exit(1)
 
     # Verify account
     client = tweepy.Client(
@@ -45,7 +51,7 @@ if len(sys.argv) == 2:
         access_token_secret=access_token_secret,
     )
     me = client.get_me()
-    username = me.data.username
+    username = me.data.username if me and me.data else "(unverified)"
 
     print()
     print("=" * 60)
@@ -63,10 +69,12 @@ handler = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, callback="oob")
 auth_url = handler.get_authorization_url()
 
 # Save request token secret for step 2
-json.dump({
-    "oauth_token":        handler.request_token["oauth_token"],
-    "oauth_token_secret": handler.request_token["oauth_token_secret"],
-}, open(STATE_FILE, "w"))
+with open(STATE_FILE, "w") as _f:
+    json.dump({
+        "oauth_token":        handler.request_token["oauth_token"],
+        "oauth_token_secret": handler.request_token["oauth_token_secret"],
+    }, _f)
+os.chmod(STATE_FILE, 0o600)  # request-token secret: owner-only
 
 print()
 print("=" * 60)

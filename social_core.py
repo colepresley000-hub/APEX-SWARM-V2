@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 
 from dotenv import load_dotenv
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -94,6 +94,7 @@ class BrandConfig:
     reply_accounts: list = field(default_factory=list)    # @handles to monitor (no @)
     reply_guidance: str = ""                              # how to reply for this brand
     reply_daily_cap: int = 15                             # max approved replies/day
+    active: bool = True                                   # False = brand shut down; NOTHING posts
 
     # ── derived ──
     @property
@@ -254,6 +255,23 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
+def truncate_keep_url(text: str, url: str, limit: int = 280) -> str:
+    """Hard-fit `text` into `limit` chars WITHOUT cutting the trailing URL.
+    The old `text[:277] + "..."` fallback could slice a link in half."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    has_url = bool(url) and text.endswith(url)
+    body = text[:-len(url)].rstrip() if has_url else text
+    tail = f" {url}" if has_url else ""
+    room = limit - len(tail) - 1            # 1 char for the ellipsis
+    cut = body[:max(room, 0)]
+    sp = cut.rfind(" ")
+    if sp > room * 0.6:                     # prefer a word boundary
+        cut = cut[:sp]
+    return cut.rstrip(" ,.;:") + "\u2026" + tail
+
+
 # ── Tweet generation ──────────────────────────────────────────────────────────
 STYLE_VARIATIONS = [
     "Open with a bold statement.",
@@ -347,15 +365,17 @@ def _shorten(brand: BrandConfig, tweet: str) -> str:
                  "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": (
             f"This tweet is {len(tweet)} chars, too long. Shorten to under 275 chars "
-            f"without losing the core message. Keep {brand.url} at the end. No hashtags. "
+            f"without losing the core message. "
+            + (f"Keep {brand.url} at the end. " if brand.url else "Do not add any link. ")
+            + f"No hashtags. "
             f"Output only the shortened tweet.\n\n{tweet}"
         )}],
     )
     out = clean_text(_first_text(msg))
     if not out:
         # Shorten returned nothing usable; hard-truncate the original as a last resort.
-        return tweet[:277] + "..."
-    return out if len(out) <= 280 else out[:277] + "..."
+        return truncate_keep_url(tweet, brand.url)
+    return out if len(out) <= 280 else truncate_keep_url(out, brand.url)
 
 def _log_usage(brand: BrandConfig, usage):
     log.info(
@@ -374,7 +394,9 @@ def generate_thread(brand: BrandConfig, topic_brief: str, n_tweets: int = 5) -> 
         "Rules:\n"
         f"- Tweet 1 is a scroll-stopping hook (no URL, end with a reason to keep reading)\n"
         "- Each subsequent tweet delivers one concrete, specific point\n"
-        f"- The FINAL tweet has a clear CTA and ends with {brand.url}\n"
+        + (f"- The FINAL tweet has a clear CTA and ends with {brand.url}\n"
+           if brand.url else "- The FINAL tweet is a plain closing thought, no link, no CTA\n") +
+        
         "- Each tweet MUST be under 280 characters\n"
         "- No hashtags, no em dashes\n"
         "- Do NOT number the tweets\n\n"
@@ -392,7 +414,7 @@ def generate_thread(brand: BrandConfig, topic_brief: str, n_tweets: int = 5) -> 
     parts = [clean_text(p) for p in raw.split("---")]
     tweets = [p for p in parts if p]
     # Enforce length
-    tweets = [t if len(t) <= 280 else t[:277] + "..." for t in tweets]
+    tweets = [t if len(t) <= 280 else truncate_keep_url(t, brand.url) for t in tweets]
     if len(tweets) < 2:
         # Empty/one-tweet output is not a thread; return [] so callers don't
         # post a lone fragment as a "thread".
@@ -449,6 +471,9 @@ def _save_draft(brand: BrandConfig, text: str, tag: str) -> Path:
 
 def post_tweet(brand: BrandConfig, text: str, category_name: str,
                media_path: Optional[str] = None) -> Optional[dict]:
+    if not brand.active:
+        log.error(f"[{brand.key}] brand is inactive (shut down); refusing to post")
+        return None
     if brand.draft_mode:
         _save_draft(brand, text, category_name)
         return {"mode": "draft", "text": text}
@@ -492,6 +517,9 @@ def post_tweet(brand: BrandConfig, text: str, category_name: str,
         return None
 
 def post_thread(brand: BrandConfig, tweets: list) -> Optional[dict]:
+    if not brand.active:
+        log.error(f"[{brand.key}] brand is inactive (shut down); refusing to post")
+        return None
     tweets = [t for t in (tweets or []) if t]
     if not tweets:
         log.error(f"[{brand.key}] post_thread called with no tweets")
@@ -552,6 +580,9 @@ def post_thread(brand: BrandConfig, tweets: list) -> Optional[dict]:
 # ── High-level autopost ───────────────────────────────────────────────────────
 def autopost(brand: BrandConfig, category_name: Optional[str] = None,
              with_visual: bool = False) -> Optional[dict]:
+    if not brand.active:
+        print(f"[{brand.key}] inactive (shut down); not posting.")
+        return None
     if not brand.has_tokens():
         msg = (f"[{brand.key}] ERROR: {brand.access_token_env}/{brand.access_secret_env} "
                f"not set in .env. Run get_twitter_tokens.py to generate them.")

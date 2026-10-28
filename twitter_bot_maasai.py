@@ -25,7 +25,7 @@ def main():
 
     elif cmd == "thread":
         topic = sys.argv[2] if len(sys.argv) > 2 else (
-            "Why global investors are sleeping on African SaaS, and the window is closing"
+            "Why raises and sale mandates stall in African markets, and what to fix first"
         )
         tweets = sc.generate_thread(MAASAI, topic, n_tweets=5)
         print(f"\n=== {MAASAI.name} THREAD ({len(tweets)} tweets) ===\n")

@@ -36,6 +36,8 @@ def _score(m: dict) -> float:
 
 
 def refresh_winners(brand) -> dict:
+    if not getattr(brand, "active", True):
+        return {"brand": brand.key, "skipped": "inactive"}
     if not brand.has_tokens():
         msg = f"[{brand.key}] no tokens set; skipping feedback"
         log.warning(msg); print(msg)
@@ -101,7 +103,7 @@ def refresh_winners(brand) -> dict:
     if winners:
         print(f"  Top tweet (score {winners[0]['score']:.0f}): {winners[0]['text'][:80]}")
     if ranked:
-        print(f"  Best categories: " + ", ".join(f"{c}={s}" for c, s in ranked[:5]))
+        print("  Best categories: " + ", ".join(f"{c}={s}" for c, s in ranked[:5]))
 
     return {"brand": brand.key, "scored": len(scored),
             "winners": len(winners), "category_avg": cat_avg}
