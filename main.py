@@ -3113,8 +3113,11 @@ def _verify_slack_signature(raw_body: bytes, timestamp: str, signature: str):
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
 
-async def _teardown_daemon(found: str):
-    """Single authoritative daemon teardown (REST + Slack must end in the same state)."""
+async def _teardown_daemon(found: str, remove_config: bool = True):
+    """Single daemon teardown. REST (authenticated per-user) removes the config;
+    Slack has no per-user identity, so it passes remove_config=False: the daemon
+    is disabled and stopped (alerts end) but the config survives and is
+    recoverable. Hard deletion stays behind the authenticated endpoint."""
     # Disable in DB first so alerts stop immediately even if task takes time to cancel
     conn = get_db()
     try:
@@ -3124,7 +3127,8 @@ async def _teardown_daemon(found: str):
         conn.close()
     await daemon_manager.stop_daemon(found)
     cancel_daemon_task(found)  # Force cancel asyncio task
-    remove_daemon_config(found)
+    if remove_config:
+        remove_daemon_config(found)
 
 
 @app.post("/api/v1/slack/commands")
@@ -3173,7 +3177,7 @@ async def slack_commands(request: Request):
             if len(matches) == 1:
                 found = matches[0]
         if found:
-            await _teardown_daemon(found)
+            await _teardown_daemon(found, remove_config=False)  # reversible; no hard delete via Slack
             return {"response_type":"in_channel","text":"Stopped "+found[:8]}
         return {"response_type":"in_channel","text":"Worker not found"}
     return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
