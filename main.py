@@ -2168,14 +2168,22 @@ Respond with ONLY a JSON object:
             imp = json.loads(clean)
             blockers = soul.get("blockers", [])
             learnings = soul.get("learnings", [])
-            for b in imp.get("new_blockers", []):
+            # Model output is UNTRUSTED (the transcript it read can contain scraped
+            # content). Coerce to short plain strings, and never let it rewrite the
+            # mission directly: park it for human review instead.
+            def _s(x, n=200):
+                return " ".join(str(x).split())[:n] if isinstance(x, (str, int, float)) else ""
+            for b in imp.get("new_blockers", [])[:5]:
+                b = _s(b)
                 if b and b not in blockers: blockers.append(b)
-            for b in imp.get("resolved_blockers", []):
+            for b in imp.get("resolved_blockers", [])[:5]:
+                b = _s(b)
                 if b in blockers: blockers.remove(b)
-            for l in imp.get("new_learnings", []):
+            for l in imp.get("new_learnings", [])[:5]:
+                l = _s(l)
                 if l and l not in learnings: learnings.append(l)
             if imp.get("mission_patch"):
-                soul["mission"] = imp["mission_patch"]
+                soul["pending_mission_patch"] = _s(imp["mission_patch"], 500)  # needs approval
             soul["blockers"] = blockers[-20:]
             soul["learnings"] = learnings[-30:]
             soul["last_improved_at"] = datetime.now(timezone.utc).isoformat()
@@ -3087,9 +3095,46 @@ async def configure_slack(request: Request, api_key: str = Depends(get_api_key))
 # earlier UNAUTHENTICATED duplicate that lived here was removed — it let any
 # caller ping the configured Slack webhook without a key.
 
+def _verify_slack_signature(raw_body: bytes, timestamp: str, signature: str):
+    """Slack request signing (v0). Fails CLOSED: with no SLACK_SIGNING_SECRET the
+    route is disabled, so nobody can drive agents or daemons through it."""
+    import hmac, hashlib, time as _time
+    secret = os.getenv("SLACK_SIGNING_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Slack commands disabled: SLACK_SIGNING_SECRET not set")
+    try:
+        if abs(_time.time() - int(timestamp)) > 300:      # replay window
+            raise HTTPException(status_code=401, detail="Stale Slack request")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Bad Slack timestamp")
+    base = b"v0:" + timestamp.encode() + b":" + raw_body
+    expected = "v0=" + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature or ""):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+
+async def _teardown_daemon(found: str):
+    """Single authoritative daemon teardown (REST + Slack must end in the same state)."""
+    # Disable in DB first so alerts stop immediately even if task takes time to cancel
+    conn = get_db()
+    try:
+        conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
+        conn.commit()
+    finally:
+        conn.close()
+    await daemon_manager.stop_daemon(found)
+    cancel_daemon_task(found)  # Force cancel asyncio task
+    remove_daemon_config(found)
+
+
 @app.post("/api/v1/slack/commands")
 async def slack_commands(request: Request):
-    form = await request.form()
+    raw_body = await request.body()
+    _verify_slack_signature(raw_body,
+                            request.headers.get("X-Slack-Request-Timestamp", ""),
+                            request.headers.get("X-Slack-Signature", ""))
+    from urllib.parse import parse_qs
+    form = {k: v[0] for k, v in parse_qs(raw_body.decode("utf-8", "replace")).items()}
     text = (form.get("text") or "").strip()
     user_name = form.get("user_name","unknown")
     response_url = form.get("response_url","")
@@ -3119,15 +3164,16 @@ async def slack_commands(request: Request):
         running = [d for d in daemons if d.get("status")=="running"]
         return {"response_type":"in_channel","text":"APEX SWARM: "+str(len(running))+" workers active"}
     elif action == "stop" and len(parts) >= 2:
-        did = parts[1]
+        did = parts[1].strip()
         found = None
-        if MISSION_CONTROL and daemon_manager:
-            for d in daemon_manager.get_daemons():
-                if d["daemon_id"].startswith(did):
-                    found = d["daemon_id"]
-                    break
+        if MISSION_CONTROL and daemon_manager and len(did) >= 8:
+            # exact id, or a prefix that is unambiguous (never "first match wins")
+            matches = [d["daemon_id"] for d in daemon_manager.get_daemons()
+                       if d["daemon_id"] == did or d["daemon_id"].startswith(did)]
+            if len(matches) == 1:
+                found = matches[0]
         if found:
-            await daemon_manager.stop_daemon(found)
+            await _teardown_daemon(found)
             return {"response_type":"in_channel","text":"Stopped "+found[:8]}
         return {"response_type":"in_channel","text":"Worker not found"}
     return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
@@ -3417,16 +3463,7 @@ async def stop_daemon(daemon_id: str, api_key: str = Depends(get_api_key)):
             break
     if not found:
         raise HTTPException(status_code=404, detail="Daemon not found")
-    # Disable in DB first so alerts stop immediately even if task takes time to cancel
-    conn = get_db()
-    try:
-        conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
-        conn.commit()
-    finally:
-        conn.close()
-    await daemon_manager.stop_daemon(found)
-    cancel_daemon_task(found)  # Force cancel asyncio task
-    remove_daemon_config(found)
+    await _teardown_daemon(found)
     return {"status": "stopped", "daemon_id": found}
 
 
