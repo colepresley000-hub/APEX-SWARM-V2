@@ -450,8 +450,10 @@ def worker():
     print("Reply approval worker started — waiting for taps. Ctrl-C to stop.")
     offset = None
     while True:
-        resp = _tg("getUpdates", {"timeout": 30, "offset": offset,
-                                  "allowed_updates": ["callback_query"]})
+        payload = {"timeout": 30, "allowed_updates": ["callback_query"]}
+        if offset is not None:      # omit rather than send JSON null on first poll
+            payload["offset"] = offset
+        resp = _tg("getUpdates", payload)
         if not resp or not resp.get("ok"):
             time.sleep(3); continue
         result = resp.get("result")
