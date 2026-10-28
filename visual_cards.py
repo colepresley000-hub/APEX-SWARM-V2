@@ -49,14 +49,28 @@ def _strip_url(text: str, url: str) -> str:
 
 
 def _wrap(draw, text, font, max_w):
-    """Wrap text to roughly fit max_w, always breaking over-long unbroken words."""
-    # estimate chars per line from average glyph width
-    avg = draw.textlength("x" * 20, font=font) / 20
-    chars_per_line = max(8, int(max_w / max(avg, 1)))
-    return textwrap.fill(
-        text, width=chars_per_line,
-        break_long_words=True, break_on_hyphens=True,
-    )
+    """Greedy word wrap measured in real pixels (the old char-count estimate
+    used the narrow glyph 'x' and let wide text overflow the right edge).
+    Over-long unbroken words are split by character."""
+    lines = []
+    for para in text.split("\n"):
+        cur = ""
+        for word in para.split():
+            # split a single word that is wider than the box
+            while draw.textlength(word, font=font) > max_w and len(word) > 1:
+                cut = len(word) - 1
+                while cut > 1 and draw.textlength(word[:cut], font=font) > max_w:
+                    cut -= 1
+                if cur:
+                    lines.append(cur); cur = ""
+                lines.append(word[:cut]); word = word[cut:]
+            trial = f"{cur} {word}".strip()
+            if cur and draw.textlength(trial, font=font) > max_w:
+                lines.append(cur); cur = word
+            else:
+                cur = trial
+        lines.append(cur)
+    return "\n".join(lines)
 
 
 def _truncate_to_height(draw, text, font, max_w, max_h, spacing):

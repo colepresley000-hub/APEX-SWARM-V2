@@ -28,7 +28,14 @@ from typing import Optional, Callable
 
 from dotenv import load_dotenv
 _env_path = Path(__file__).resolve().parent / ".env"
+# .env wins for credentials (a stale key exported in the shell must not shadow
+# it), but safety/mode switches set explicitly in the caller's environment must
+# survive: `TWITTER_DRAFT_MODE=true python twitter_bot.py autopost` was being
+# overridden by .env's "false" and posting LIVE.
+_CONTROL_VARS = ("TWITTER_DRAFT_MODE", "MAASAI_DRAFT_MODE", "REPLY_MODE")
+_explicit = {k: os.environ[k] for k in _CONTROL_VARS if k in os.environ}
 load_dotenv(_env_path, override=True)
+os.environ.update(_explicit)
 
 import tweepy
 import anthropic
@@ -233,7 +240,12 @@ def get_recent_tweets(brand: BrandConfig, n: int = 10) -> list:
 # ── Text hygiene ──────────────────────────────────────────────────────────────
 def clean_text(text: str) -> str:
     import re
-    text = text.strip().strip('"').strip("'")
+    text = text.strip()
+    # Only unwrap double quotes that wrap the whole text. A single quote at
+    # either end is far more likely a real apostrophe ("'til", "the '90s'")
+    # than a wrapper, so it is left alone.
+    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        text = text[1:-1].strip()
     # Normalize em/en dashes to a comma without creating "word,word"
     text = re.sub(r"\s*[—–]\s*", ", ", text)
     # Collapse any accidental double spaces / space-before-punctuation
@@ -381,6 +393,11 @@ def generate_thread(brand: BrandConfig, topic_brief: str, n_tweets: int = 5) -> 
     tweets = [p for p in parts if p]
     # Enforce length
     tweets = [t if len(t) <= 280 else t[:277] + "..." for t in tweets]
+    if len(tweets) < 2:
+        # Empty/one-tweet output is not a thread; return [] so callers don't
+        # post a lone fragment as a "thread".
+        log.error(f"[{brand.key}] thread generation returned {len(tweets)} tweet(s)")
+        return []
     return tweets
 
 
@@ -390,8 +407,13 @@ _CREDIT_ALERT_COOLDOWN = 6 * 3600  # ping at most once per 6h
 
 def is_credit_error(exc) -> bool:
     """True if a Tweepy exception is an X API 402 / no-credits / billing error."""
+    # Prefer the real HTTP status; a bare "402" substring match false-positives
+    # on any message containing those digits (ids, ports, timestamps).
+    resp = getattr(exc, "response", None)
+    if getattr(resp, "status_code", None) == 402:
+        return True
     s = str(exc).lower()
-    return ("402" in s or "payment required" in s
+    return ("payment required" in s
             or "does not have any credits" in s or "not have any credits" in s)
 
 def notify_credits_empty(brand: BrandConfig, context: str = ""):

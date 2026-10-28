@@ -58,18 +58,26 @@ _DEDICATED = bool(os.getenv("TELEGRAM_APPROVAL_BOT_TOKEN", ""))
 
 # ── Queue persistence ─────────────────────────────────────────────────────────
 def load_queue(brand) -> dict:
+    q = {}
     f = brand.reply_queue_file
     if f.exists():
         try:
-            return json.loads(f.read_text())
+            q = json.loads(f.read_text())
         except Exception:
-            pass
-    return {"pending": [], "seen_ids": [], "history": []}
+            q = {}
+    if not isinstance(q, dict):
+        q = {}
+    # Older/partial files may lack keys; callers index them directly.
+    q.setdefault("pending", [])
+    q.setdefault("seen_ids", [])
+    q.setdefault("history", [])
+    return q
 
 def save_queue(brand, q: dict):
     q["seen_ids"] = q["seen_ids"][-2000:]
     q["history"] = q["history"][-500:]
-    brand.reply_queue_file.write_text(json.dumps(q, indent=2))
+    # Atomic: the scan cron and the approval worker both write this file.
+    sc._atomic_write(brand.reply_queue_file, json.dumps(q, indent=2))
 
 def _approved_today(q: dict) -> int:
     today = date.today().isoformat()
@@ -80,7 +88,6 @@ def _approved_today(q: dict) -> int:
 # ── Network mode: reply only to accounts you follow (no Premium needed) ────────
 # X blocks non-Premium accounts from replying to strangers. Replying to people
 # you follow is allowed, so we discover candidates from your own follow graph.
-FOLLOWS_CACHE = sc.DATA_DIR / "{key}_follows.json"
 FOLLOWS_TTL = 24 * 3600
 NETWORK_CHUNK = 15  # how many follows to query per scan (query-length safe)
 
@@ -243,30 +250,46 @@ def _tg(method, payload):
     import requests
     url = TG_API.format(token=APPROVAL_TOKEN, method=method)
     try:
-        return requests.post(url, json=payload, timeout=35).json()
+        resp = requests.post(url, json=payload, timeout=35).json()
     except Exception as e:
         log.error(f"Telegram {method} failed: {e}")
         return None
+    if not resp.get("ok"):
+        # e.g. HTML parse_mode requests fail hard (400) if the text contains
+        # unescaped <, >, & — surface it instead of a silent no-op message.
+        log.error(f"Telegram {method} rejected: {resp.get('description', resp)}")
+    return resp
 
-def send_for_approval(brand, item: dict):
-    orig = item["candidate_text"]
-    reply = item["reply_text"]
+def _html_escape(s: str) -> str:
+    """Escape text for Telegram parse_mode=HTML. Untrusted text (tweet
+    content, Claude output) can contain <, >, & which otherwise break or
+    truncate HTML parsing and cause sendMessage to fail with no draft
+    ever reaching the chat."""
+    return (str(s or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+def send_for_approval(brand, item: dict) -> bool:
+    orig = _html_escape(item["candidate_text"][:280])
+    reply = _html_escape(item["reply_text"])
     tweet_url = f"https://x.com/i/web/status/{item['tweet_id']}"
     text = (
         f"<b>🔁 {brand.name} reply draft</b>\n\n"
-        f"<b>They said:</b>\n{orig[:280]}\n\n"
-        f"<b>Your reply ({len(reply)} chars):</b>\n{reply}\n\n"
+        f"<b>They said:</b>\n{orig}\n\n"
+        f"<b>Your reply ({len(item['reply_text'])} chars):</b>\n{reply}\n\n"
         f"<a href=\"{tweet_url}\">view original tweet</a>"
     )
     markup = {"inline_keyboard": [[
         {"text": "✅ Approve & post", "callback_data": f"rok:{brand.key}:{item['id']}"},
         {"text": "✏️ Skip",           "callback_data": f"rno:{brand.key}:{item['id']}"},
     ]]}
-    _tg("sendMessage", {
+    resp = _tg("sendMessage", {
         "chat_id": sc.TELEGRAM_CHAT_ID, "text": text,
         "parse_mode": "HTML", "disable_web_page_preview": True,
         "reply_markup": markup,
     })
+    return bool(resp and resp.get("ok"))
 
 
 # ── Scan command ──────────────────────────────────────────────────────────────
@@ -292,7 +315,12 @@ def scan(brand):
         candidates = find_candidates_network(brand, q)
     if not candidates:
         print(f"[{brand.key}] no new candidates this scan")
-        save_queue(brand, q)  # persist net_offset rotation even when empty
+        # Persist net_offset rotation even when empty, merged onto the latest
+        # file so we don't clobber concurrent worker updates.
+        fresh = load_queue(brand)
+        if "net_offset" in q:
+            fresh["net_offset"] = q["net_offset"]
+        save_queue(brand, fresh)
         return
 
     n_new = 0
@@ -315,16 +343,40 @@ def scan(brand):
                 "queued_at": datetime.now().isoformat(),
                 "status": "pending",
             }
-            q["pending"].append(item)
-            send_for_approval(brand, item)
-            n_new += 1
+            if send_for_approval(brand, item):
+                q["pending"].append(item)
+                n_new += 1
+            else:
+                # Never delivered to Telegram — if it went into "pending" anyway
+                # it would sit forever with no Approve/Skip buttons ever shown,
+                # since the only way out of "pending" is a callback tap.
+                log.error(f"[{brand.key}] draft for tweet {c['id']} not delivered to Telegram — dropped")
+                q["history"].append({"id": item["id"], "status": "delivery_failed",
+                                      "at": datetime.now().isoformat()})
             time.sleep(1)
         except Exception as e:
             # One bad candidate (network/API blip) must not abort the scan.
             log.warning(f"[{brand.key}] candidate {c['id']} failed: {e}")
             continue
 
-    save_queue(brand, q)
+    # The scan can run for minutes (drafting + Telegram sends) while the worker
+    # handles taps. Saving our stale in-memory `q` would resurrect items the
+    # worker already approved/skipped and drop its history. Re-load the latest
+    # file and merge only what this scan produced.
+    fresh = load_queue(brand)
+    fresh_pending_ids = {p["id"] for p in fresh["pending"]}
+    handled_ids = {h.get("id") for h in fresh["history"]}
+    for item in q["pending"]:
+        if item["id"] not in fresh_pending_ids and item["id"] not in handled_ids:
+            fresh["pending"].append(item)
+    fresh["seen_ids"] = list(dict.fromkeys(fresh["seen_ids"] + q["seen_ids"]))
+    known_hist = {(h.get("id"), h.get("status")) for h in fresh["history"]}
+    for h in q["history"]:
+        if (h.get("id"), h.get("status")) not in known_hist:
+            fresh["history"].append(h)
+    if "net_offset" in q:
+        fresh["net_offset"] = q["net_offset"]
+    save_queue(brand, fresh)
     print(f"[{brand.key}] queued {n_new} draft replies → check Telegram to approve")
 
 

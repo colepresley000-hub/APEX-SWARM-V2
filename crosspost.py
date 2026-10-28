@@ -81,7 +81,7 @@ class LinkedInChannel(Channel):
                 f"No hashtags beyond at most 2 relevant ones.\n\nTweet:\n{idea}"
             )}],
         )
-        return sc.clean_text(msg.content[0].text)
+        return sc.clean_text(sc._first_text(msg))
     def post(self, brand, text, media_path=None):
         import requests
         body = {
@@ -147,13 +147,24 @@ def fan_out(brand, dry: bool = False):
             print(f"[{ch.name}] disabled (missing config) — skipping")
             results.append({"channel": ch.name, "enabled": False})
             continue
-        text = ch.adapt(brand, idea)
-        print(f"\n--- {ch.name} version ---\n{text}\n")
-        if dry:
-            results.append({"channel": ch.name, "dry": True})
+        # X posting needs this brand's user tokens (e.g. Maasai has none yet);
+        # without this guard we'd attempt a doomed post on every run.
+        if ch.name == "x" and not brand.has_tokens() and not dry:
+            print(f"[x] {brand.key} has no access tokens — skipping")
+            results.append({"channel": "x", "enabled": False, "reason": "no tokens"})
             continue
-        res = ch.post(brand, text)
-        results.append({"channel": ch.name, "result": res})
+        # One channel failing (API/network error) must not abort the others.
+        try:
+            text = ch.adapt(brand, idea)
+            print(f"\n--- {ch.name} version ---\n{text}\n")
+            if dry:
+                results.append({"channel": ch.name, "dry": True})
+                continue
+            res = ch.post(brand, text)
+            results.append({"channel": ch.name, "result": res})
+        except Exception as e:
+            log.error(f"[{ch.name}] failed: {e}")
+            results.append({"channel": ch.name, "error": str(e)[:200]})
 
     return results
 

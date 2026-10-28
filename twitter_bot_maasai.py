@@ -31,6 +31,9 @@ def main():
         print(f"\n=== {MAASAI.name} THREAD ({len(tweets)} tweets) ===\n")
         for i, t in enumerate(tweets, 1):
             print(f"[{i}] ({len(t)} chars) {t}\n")
+        if not tweets:
+            print("Thread generation failed; nothing posted.")
+            sys.exit(1)
         sc.post_thread(MAASAI, tweets)
 
     elif cmd == "preview":
