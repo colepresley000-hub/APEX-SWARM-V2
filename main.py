@@ -3118,17 +3118,23 @@ async def _teardown_daemon(found: str, remove_config: bool = True):
     Slack has no per-user identity, so it passes remove_config=False: the daemon
     is disabled and stopped (alerts end) but the config survives and is
     recoverable. Hard deletion stays behind the authenticated endpoint."""
-    # Disable in DB first so alerts stop immediately even if task takes time to cancel
+    # Disable in DB first so alerts stop immediately even if task takes time to cancel.
+    # A DB failure must never leave the daemon RUNNING: log it and still stop.
+    db_ok = True
     conn = get_db()
     try:
-        conn.execute("UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
+        db_execute(conn, "UPDATE daemon_configs SET enabled = 0 WHERE id = ?", (found,))
         conn.commit()
+    except Exception as e:
+        db_ok = False
+        logger.error(f"teardown {found[:8]}: could not disable config in DB: {e}")
     finally:
         conn.close()
     await daemon_manager.stop_daemon(found)
     cancel_daemon_task(found)  # Force cancel asyncio task
-    if remove_config:
+    if remove_config and db_ok:   # never delete a config we could not even disable
         remove_daemon_config(found)
+    return db_ok
 
 
 @app.post("/api/v1/slack/commands")
