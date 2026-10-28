@@ -2154,7 +2154,10 @@ Respond with ONLY a JSON object:
   "summary": "1-2 sentence summary of changes"
 }}"""
 
-        result = await router.call(
+        if not model_router:
+            logger.warning(f"Self-improve skipped {daemon_id[:8]}: multi-model router unavailable")
+            return
+        result = await model_router.call(
             system_prompt="You are a daemon self-improvement engine. Output only valid JSON, no markdown.",
             messages=[{"role": "user", "content": improvement_prompt}],
             max_tokens=800,
@@ -3110,13 +3113,22 @@ async def slack_commands(request: Request):
             await respond("Error: "+str(e))
         return {"response_type":"in_channel","text":"Processing..."}
     elif action == "status":
-        running = [d for d in active_daemons.values() if d.get("status")=="running"]
+        # `active_daemons` was never defined here (NameError -> HTTP 500);
+        # the live registry is daemon_manager.
+        daemons = daemon_manager.get_daemons() if (MISSION_CONTROL and daemon_manager) else []
+        running = [d for d in daemons if d.get("status")=="running"]
         return {"response_type":"in_channel","text":"APEX SWARM: "+str(len(running))+" workers active"}
     elif action == "stop" and len(parts) >= 2:
         did = parts[1]
-        if did in active_daemons:
-            active_daemons[did]["status"] = "stopped"
-            return {"response_type":"in_channel","text":"Stopped "+did[:8]}
+        found = None
+        if MISSION_CONTROL and daemon_manager:
+            for d in daemon_manager.get_daemons():
+                if d["daemon_id"].startswith(did):
+                    found = d["daemon_id"]
+                    break
+        if found:
+            await daemon_manager.stop_daemon(found)
+            return {"response_type":"in_channel","text":"Stopped "+found[:8]}
         return {"response_type":"in_channel","text":"Worker not found"}
     return {"response_type":"in_channel","text":"/apex deploy <type> <task> | /apex status | /apex stop <id>"}
 
