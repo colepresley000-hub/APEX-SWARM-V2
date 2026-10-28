@@ -16,7 +16,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 API_KEY    = os.getenv("TWITTER_API_KEY")
 API_SECRET = os.getenv("TWITTER_API_SECRET")
-STATE_FILE = "/tmp/twitter_oauth_state.json"
+STATE_FILE = os.environ.get("TWITTER_OAUTH_STATE", "/tmp/twitter_oauth_state.json")
 
 if not API_KEY or not API_SECRET:
     print("ERROR: TWITTER_API_KEY / TWITTER_API_SECRET not found in .env")

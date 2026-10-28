@@ -61,6 +61,7 @@ def refresh_winners(brand) -> dict:
 
     client = sc.v2_client(brand)
     scored = []
+    any_batch_ok = False
     # X API allows 100 ids per get_tweets call
     for i in range(0, len(ids), 100):
         batch = ids[i:i+100]
@@ -71,6 +72,7 @@ def refresh_winners(brand) -> dict:
         except tweepy.TweepyException as e:
             log.warning(f"[{brand.key}] metrics fetch failed: {e}")
             continue
+        any_batch_ok = True
         for t in (resp.data or []):
             m = t.public_metrics or {}
             entry = id_map.get(str(t.id), {})
@@ -81,6 +83,12 @@ def refresh_winners(brand) -> dict:
                 "metrics": m,
                 "score": _score(m),
             })
+
+    if not any_batch_ok:
+        # Every request failed (outage/rate limit). Keep the existing winners
+        # instead of overwriting them with an empty list.
+        print(f"[{brand.key}] metrics unavailable; keeping existing winners")
+        return {"brand": brand.key, "scored": 0, "error": "metrics unavailable"}
 
     scored.sort(key=lambda x: x["score"], reverse=True)
     winners = [w for w in scored if w["score"] > 0][:MAX_WINNERS]

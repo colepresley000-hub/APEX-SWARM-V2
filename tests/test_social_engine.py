@@ -288,6 +288,15 @@ class FeedbackTests(Base):
         b = make_brand(self.tmp, active=False)
         self.assertEqual(fb.refresh_winners(b)["skipped"], "inactive")
 
+    def test_total_outage_keeps_existing_winners(self):
+        self.brand.winners_file.write_text(json.dumps([{"id": "1", "text": "keep me", "score": 9}]))
+        self._posted([{"id": "5", "text": "t", "category": "c"}])
+        c = mock.Mock(); c.get_tweets.side_effect = tweepy.TweepyException("down")
+        with mock.patch.object(sc, "v2_client", return_value=c):
+            out = fb.refresh_winners(self.brand)
+        self.assertEqual(out["error"], "metrics unavailable")
+        self.assertEqual(json.loads(self.brand.winners_file.read_text())[0]["text"], "keep me")
+
 
 class CoreTests(Base):
     def test_kill_switch_every_entrypoint(self):
@@ -322,6 +331,124 @@ class CoreTests(Base):
         n.assert_called_once()
         logged = sc.load_posted(self.brand)
         self.assertTrue(logged[0]["partial"]); self.assertEqual(logged[0]["thread_ids"], ["1"])
+
+
+class BrandConfigTests(unittest.TestCase):
+    def setUp(self):
+        import brands
+        self.b = brands
+
+    def test_every_brand_is_valid(self):
+        keys, envs = set(), set()
+        for br in self.b.BRANDS.values():
+            self.assertNotIn(br.key, keys); keys.add(br.key)
+            for e in (br.access_token_env, br.access_secret_env):
+                self.assertNotIn(e, envs); envs.add(e)           # no shared token vars
+            names = [c["name"] for c in br.categories]
+            self.assertEqual(len(names), len(set(names)), br.key)
+            for c in br.categories:
+                self.assertIsInstance(c["weight"], int); self.assertGreater(c["weight"], 0)
+                self.assertTrue(c["style"].strip() and c["brief"].strip())
+            self.assertTrue(br.weighted_pool)
+
+    def test_apex_is_shut_down_and_maasai_is_clean(self):
+        self.assertFalse(self.b.APEX.active); self.assertTrue(self.b.MAASAI.active)
+        m = self.b.MAASAI
+        blob = " ".join([m.system_prompt, m.product_context, m.reply_guidance, json.dumps(m.theme),
+                         " ".join(c["brief"] + c["style"] for c in m.categories),
+                         " ".join(m.reply_keywords)]).lower()
+        for banned in ("apex", "swarmsfall", "shieldclaw", "submit your deck", "maasai.vc"):
+            self.assertNotIn(banned, blob, banned)
+        # the only "marketplace" mentions must be the prohibition, not a claim
+        for c in m.categories:
+            self.assertNotIn("marketplace", c["brief"].lower())
+        self.assertEqual(m.url, "")
+
+    def test_get_brand(self):
+        self.assertIs(self.b.get_brand("maasai"), self.b.MAASAI)
+        with self.assertRaises(KeyError):
+            self.b.get_brand("nope")
+
+
+class TokenScriptTests(unittest.TestCase):
+    SCRIPT = str(pathlib.Path(__file__).resolve().parent.parent / "get_twitter_tokens.py")
+
+    def run_script(self, argv, env, handler=None, client=None):
+        import contextlib, io, runpy
+        out = io.StringIO(); code = None
+        keys = ("TWITTER_API_KEY", "TWITTER_API_SECRET", "TWITTER_OAUTH_STATE")
+        old = {k: os.environ.get(k) for k in keys}
+        for k in keys: os.environ.pop(k, None)
+        os.environ.update(env)
+        patches = []
+        if handler: patches.append(mock.patch.object(tweepy, "OAuth1UserHandler", handler))
+        if client: patches.append(mock.patch.object(tweepy, "Client", client))
+        # keep the real .env from filling in missing keys
+        patches.append(mock.patch("dotenv.load_dotenv", lambda *a, **k: False))
+        try:
+            for p in patches: p.start()
+            with contextlib.redirect_stdout(out), mock.patch.object(sys, "argv", ["get_twitter_tokens.py"] + argv):
+                try:
+                    runpy.run_path(self.SCRIPT, run_name="__main__")
+                except SystemExit as e:
+                    code = e.code
+        finally:
+            for p in patches: p.stop()
+            for k, v in old.items():
+                os.environ.pop(k, None)
+                if v is not None: os.environ[k] = v
+        return code, out.getvalue()
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.state = os.path.join(self.tmp.name, "state.json")
+        self.env = {"TWITTER_API_KEY": "k", "TWITTER_API_SECRET": "s", "TWITTER_OAUTH_STATE": self.state}
+
+    def handler(self, access=("AT", "AS"), fail=False):
+        h = mock.Mock()
+        h.get_authorization_url.return_value = "https://api.twitter.com/oauth/authorize?oauth_token=RT"
+        h.request_token = {"oauth_token": "RT", "oauth_token_secret": "RS"}
+        if fail:
+            h.get_access_token.side_effect = tweepy.TweepyException("Invalid oauth_verifier")
+        else:
+            h.get_access_token.return_value = access
+        return mock.Mock(return_value=h)
+
+    def test_missing_app_keys_exits_1(self):
+        code, out = self.run_script([], {"TWITTER_OAUTH_STATE": self.state})
+        self.assertEqual(code, 1); self.assertIn("not found", out)
+
+    def test_step1_writes_private_state_and_prints_url(self):
+        code, out = self.run_script([], self.env, handler=self.handler())
+        self.assertIn("oauth_token=RT", out)
+        self.assertEqual(json.load(open(self.state))["oauth_token_secret"], "RS")
+        self.assertEqual(oct(os.stat(self.state).st_mode & 0o777), "0o600")
+
+    def test_step2_without_state_exits_1(self):
+        code, out = self.run_script(["1234567"], self.env, handler=self.handler())
+        self.assertEqual(code, 1); self.assertIn("no saved OAuth state", out)
+
+    def test_step2_bad_pin_is_friendly_and_keeps_state(self):
+        json.dump({"oauth_token": "RT", "oauth_token_secret": "RS"}, open(self.state, "w"))
+        code, out = self.run_script(["000"], self.env, handler=self.handler(fail=True))
+        self.assertEqual(code, 1); self.assertIn("PIN rejected", out)
+        self.assertTrue(os.path.exists(self.state))
+
+    def test_step2_success_prints_tokens_and_clears_state(self):
+        json.dump({"oauth_token": "RT", "oauth_token_secret": "RS"}, open(self.state, "w"))
+        client = mock.Mock(return_value=mock.Mock(get_me=mock.Mock(
+            return_value=NS(data=NS(username="maasai_vc")))))
+        code, out = self.run_script(["1234567"], self.env, handler=self.handler(), client=client)
+        self.assertEqual(code, 0)
+        self.assertIn("authorized as @maasai_vc", out)
+        self.assertIn("MAASAI_ACCESS_TOKEN=AT", out); self.assertIn("MAASAI_ACCESS_SECRET=AS", out)
+        self.assertFalse(os.path.exists(self.state))
+
+    def test_step2_unverified_account_does_not_crash(self):
+        json.dump({"oauth_token": "RT", "oauth_token_secret": "RS"}, open(self.state, "w"))
+        client = mock.Mock(return_value=mock.Mock(get_me=mock.Mock(return_value=NS(data=None))))
+        code, out = self.run_script(["1"], self.env, handler=self.handler(), client=client)
+        self.assertEqual(code, 0); self.assertIn("(unverified)", out)
 
 
 if __name__ == "__main__":
